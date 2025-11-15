@@ -73,6 +73,9 @@ func NewProtocol() (core.Protocol, []core.ContextBuilderOption, error) {
 			return nil
 		}),
 		core.ContextWithExitFunc(func(ctx core.Context) error {
+			if proto.node == nil {
+				return nil
+			}
 			err := proto.node.Stop(ctx)
 			if err != nil {
 				return err
@@ -105,7 +108,7 @@ func buildServer(ctx core.Context) (server.Server, error) {
 
 	var seedNodes = pluginConfig.BootstrapPeers
 
-	if len(protoCfg.Peers) > 0 {
+	if protoCfg != nil && len(protoCfg.Peers) > 0 {
 		seedNodes = protoCfg.Peers
 	}
 	return server.NewServerBuilder().
