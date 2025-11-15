@@ -103,7 +103,7 @@ func buildServer(ctx core.Context) (server.Server, error) {
 
 	protoCfg := core.GetProtocolConfig[*pluginConfig.ProtocolConfig](ctx, internal.ProtocolName)
 
-	var seedNodes []string
+	var seedNodes = pluginConfig.BootstrapPeers
 
 	if len(protoCfg.Peers) > 0 {
 		seedNodes = protoCfg.Peers

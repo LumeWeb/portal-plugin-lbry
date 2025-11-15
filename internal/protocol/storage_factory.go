@@ -69,6 +69,9 @@ func WithContext(ctx core.Context) liblbry.StoreFactoryOption {
 // This method implements the StoreFactoryOption interface.
 func (o ContextOption) Apply(factory any) error {
 	if lbryFactory, ok := factory.(*StoreFactory); ok {
+		if o.ctx == nil {
+			return fmt.Errorf("nil context in ContextOption")
+		}
 		lbryFactory.ctx = o.ctx
 		lbryFactory.logger = o.ctx.Logger()
 		return nil

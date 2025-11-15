@@ -65,12 +65,20 @@ func (bs *BlobStore) Has(hash string) (bool, error) {
 		}
 
 		// Try to download the object to verify it exists
-		_, err = bs.storageSvc.DownloadObject(context.Background(), bs.proto, storageHash, 0)
+		reader, err := bs.storageSvc.DownloadObject(context.Background(), bs.proto, storageHash, 0)
 		if err != nil {
 			// Object doesn't exist in storage, but metadata exists
 			// This could happen if there was a partial upload
 			return false, nil
 		}
+		
+		// Properly close the reader to prevent resource leaks
+		func() {
+			if closer, ok := reader.(io.Closer); ok {
+				_ = closer.Close()
+			}
+		}()
+		
 		return true, nil
 	}
 

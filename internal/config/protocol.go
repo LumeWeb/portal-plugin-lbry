@@ -7,7 +7,7 @@ import (
 
 var _ config.Defaults = (*ProtocolConfig)(nil)
 
-var bootstrapPeers = []string{
+var BootstrapPeers = []string{
 	"s1.lbry.network",
 }
 
