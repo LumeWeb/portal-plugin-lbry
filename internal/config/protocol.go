@@ -7,7 +7,12 @@ import (
 
 var _ config.Defaults = (*ProtocolConfig)(nil)
 
+var bootstrapPeers = []string{
+	"s1.lbry.network",
+}
+
 type ProtocolConfig struct {
+	Peers []string `config:"peers"`
 }
 
 func (c ProtocolConfig) Defaults() map[string]any {
@@ -15,5 +20,7 @@ func (c ProtocolConfig) Defaults() map[string]any {
 }
 
 func (c ProtocolConfig) Schema() z.ZogSchema {
-	return z.Struct(z.Shape{})
+	return z.Struct(z.Shape{
+		"Peers": z.Slice(z.String()),
+	})
 }

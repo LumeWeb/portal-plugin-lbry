@@ -28,7 +28,8 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
 # .vscode/
 .aider*
 .idea
+vendor
+
