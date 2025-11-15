@@ -16,7 +16,7 @@ func LBRYHashToHash(hash string) (core.StorageHash, error) {
 
 	c, err := cid.Decode(multihash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode CID from multihash: %w", err)
 	}
 
 	return core.NewStorageHashFromMultihash(c.Hash(), c.Type(), nil), nil

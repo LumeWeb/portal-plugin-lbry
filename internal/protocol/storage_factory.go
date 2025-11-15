@@ -13,8 +13,7 @@ import (
 //
 // It creates BlobStore objects and requires a core.Context to be provided via the WithContext option.
 type StoreFactory struct {
-	ctx    core.Context
-	logger *core.Logger
+	ctx core.Context
 }
 
 // ContextOption implements the StoreFactoryOption interface for passing core.Context.
@@ -73,7 +72,6 @@ func (o ContextOption) Apply(factory any) error {
 			return fmt.Errorf("nil context in ContextOption")
 		}
 		lbryFactory.ctx = o.ctx
-		lbryFactory.logger = o.ctx.Logger()
 		return nil
 	}
 	return fmt.Errorf("invalid factory type: expected *StoreFactory")

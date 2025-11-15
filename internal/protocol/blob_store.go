@@ -9,6 +9,8 @@ import (
 	"sort"
 
 	"github.com/samber/lo"
+	"go.lumeweb.com/portal-plugin-lbry/internal"
+	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 
 	"go.lumeweb.com/liblbry/stream"
@@ -30,9 +32,9 @@ type BlobStore struct {
 
 // NewLBRYBlobStore creates a new instance of BlobStore
 func NewLBRYBlobStore(ctx core.Context) (*BlobStore, error) {
-	proto, ok := core.GetProtocol("lbry").(core.StorageProtocol)
+	proto, ok := core.GetProtocol(internal.ProtocolName).(core.StorageProtocol)
 	if !ok {
-		return nil, fmt.Errorf("protocol not found: lbry")
+		return nil, fmt.Errorf("protocol not found: %s", internal.ProtocolName)
 	}
 
 	storageSvc := core.GetService[core.StorageService](ctx, core.STORAGE_SERVICE)
@@ -71,14 +73,14 @@ func (bs *BlobStore) Has(hash string) (bool, error) {
 			// This could happen if there was a partial upload
 			return false, nil
 		}
-		
+
 		// Properly close the reader to prevent resource leaks
 		func() {
 			if closer, ok := reader.(io.Closer); ok {
 				_ = closer.Close()
 			}
 		}()
-		
+
 		return true, nil
 	}
 
@@ -146,7 +148,10 @@ func (bs *BlobStore) getSDBlob(_stream *pluginDb.Stream, hash string) ([]byte, e
 		var blob pluginDb.Blob
 		err = bs.db.Where("id = ?", streamBlob.BlobID).First(&blob).Error
 		if err != nil {
-			// Skip blobs that don't exist anymore
+			// Skip blobs that don't exist anymore - this may indicate data integrity issues
+			bs.logger.Warn("Skipping missing blob for stream",
+				zap.Uint64("blob_id", streamBlob.BlobID),
+				zap.Uint("stream_id", _stream.ID))
 			continue
 		}
 
@@ -198,32 +203,25 @@ func (bs *BlobStore) getRegularBlob(hash string) ([]byte, error) {
 	}
 
 	// Try to download the blob data from storage
-	data, err := bs.storageSvc.DownloadObject(context.Background(), bs.proto, storageHash, 0)
+	rc, err := bs.storageSvc.DownloadObject(context.Background(), bs.proto, storageHash, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download blob %q: %w", hash, err)
 	}
 
-	var closeErr error
+	// Ensure the reader is closed
 	defer func() {
-		if closer, ok := data.(io.Closer); ok {
-			if err := closer.Close(); err != nil {
-				closeErr = err
-			}
+		if closer, ok := rc.(io.Closer); ok {
+			_ = closer.Close()
 		}
 	}()
 
 	// Read all data from the reader
-	_bytes, err := io.ReadAll(data)
+	b, err := io.ReadAll(rc)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read blob data for blob %q: %w", hash, err)
 	}
 
-	// Return close error if it occurred after successful read
-	if closeErr != nil {
-		return nil, fmt.Errorf("failed to close blob data reader for blob %q: %w", hash, closeErr)
-	}
-
-	return _bytes, nil
+	return b, nil
 }
 
 // hasBlobMetadata checks if blob metadata exists in the database

@@ -13,10 +13,6 @@ CREATE TABLE IF NOT EXISTS lbry_streams (
     deleted_at TIMESTAMP DEFAULT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_lbry_stream_hash ON lbry_streams(stream_hash);
-CREATE INDEX IF NOT EXISTS idx_lbry_sd_hash ON lbry_streams(sd_hash);
-CREATE INDEX IF NOT EXISTS idx_lbry_created_at ON lbry_streams(created_at);
-
 CREATE TABLE IF NOT EXISTS lbry_blobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     blob_hash TEXT NOT NULL UNIQUE,
@@ -26,9 +22,6 @@ CREATE TABLE IF NOT EXISTS lbry_blobs (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP DEFAULT NULL
 );
-
-CREATE INDEX IF NOT EXISTS idx_lbry_blob_hash ON lbry_blobs(blob_hash);
-CREATE INDEX IF NOT EXISTS idx_lbry_created_at ON lbry_blobs(created_at);
 
 CREATE TABLE IF NOT EXISTS lbry_stream_blobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,9 +36,6 @@ CREATE TABLE IF NOT EXISTS lbry_stream_blobs (
     UNIQUE(stream_id, blob_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_lbry_stream_blob_numbers ON lbry_stream_blobs(stream_id, blob_number);
-CREATE INDEX IF NOT EXISTS idx_lbry_blob_order ON lbry_stream_blobs(blob_number);
-
 CREATE TABLE IF NOT EXISTS lbry_stream_pins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -56,9 +46,6 @@ CREATE TABLE IF NOT EXISTS lbry_stream_pins (
     FOREIGN KEY (stream_id) REFERENCES lbry_streams(id) ON DELETE CASCADE,
     UNIQUE(user_id, stream_id)
 );
-
-CREATE INDEX IF NOT EXISTS idx_lbry_user_pinned_at ON lbry_stream_pins(user_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_lbry_stream_pinned_at ON lbry_stream_pins(stream_id, created_at);
 -- +goose StatementEnd
 
 -- +goose Down

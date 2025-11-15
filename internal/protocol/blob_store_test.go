@@ -31,25 +31,28 @@ func TestLBRYBlobStore_NewLBRYBlobStore(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
 		// We'll test this by checking if the blob store can be created successfully
+		ast := assert.New(tb)
 
 		// Act
 		store, err := NewLBRYBlobStore(ctx)
 
 		// Assert
-		assert.NoError(t, err)
-		assert.NotNil(t, store)
-		assert.Equal(t, BLOBSTORE_NAME, store.Name())
+		ast.NoError(err)
+		ast.NotNil(store)
+		ast.Equal(BLOBSTORE_NAME, store.Name())
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Has(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -59,8 +62,8 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 		has, err := store.Has(testHash)
 
 		// Assert
-		assert.NoError(t, err)
-		assert.False(t, has)
+		ast.NoError(err)
+		ast.False(has)
 
 		// Act - Test when blob exists in DB but not in storage
 		// Insert blob into DB
@@ -69,41 +72,43 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 			BlobSize: 100,
 		}
 		err = ctx.DB().Create(&blob).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Set up mock expectation for when blob exists in DB but not in storage
 		storageHash, err := LBRYHashToHash(testHash)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).Return(nil, fmt.Errorf("object not found"))
 
 		has, err = store.Has(testHash)
-		assert.NoError(t, err)
-		assert.False(t, has)
+		ast.NoError(err)
+		ast.False(has)
 
 		// Act - Test when blob exists in both DB and storage
 		// Create a fresh mock instance
-		mockStorage = coreMocks.NewMockStorageService(t)
+		mockStorage = coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).Return(io.NopCloser(strings.NewReader(testData1)), nil)
 
 		has, err = store.Has(testHash)
-		assert.NoError(t, err)
-		assert.True(t, has)
+		ast.NoError(err)
+		ast.True(has)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Get(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -116,11 +121,11 @@ func TestLBRYBlobStore_Get(t *testing.T) {
 			BlobSize: len(testData),
 		}
 		err = ctx.DB().Create(&blob).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Set up mock expectations
 		storageHash, err := LBRYHashToHash(testHash)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).
 			Return(io.NopCloser(bytes.NewReader(testData)), nil)
@@ -129,21 +134,23 @@ func TestLBRYBlobStore_Get(t *testing.T) {
 		data, err := store.Get(testHash)
 
 		// Assert
-		assert.NoError(t, err)
-		assert.Equal(t, testData, data)
+		ast.NoError(err)
+		ast.Equal(testData, data)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Create test SD blob data
@@ -156,7 +163,7 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 
 		// Serialize the SDBlob to its binary format
 		_, err = sdBlob.ToBlob()
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create stream in DB
 		_stream := db.Stream{
@@ -168,7 +175,7 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 			KeyData:           sdBlob.Key,
 		}
 		err = ctx.DB().Create(&_stream).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create associated blobs
 		blob1 := db.Blob{
@@ -181,9 +188,9 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 		}
 
 		err = ctx.DB().Create(&blob1).Error
-		require.NoError(t, err)
+		req.NoError(err)
 		err = ctx.DB().Create(&blob2).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create stream_blob associations
 		streamBlob1 := db.StreamBlob{
@@ -198,9 +205,9 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 		}
 
 		err = ctx.DB().Create(&streamBlob1).Error
-		require.NoError(t, err)
+		req.NoError(err)
 		err = ctx.DB().Create(&streamBlob2).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// For this test, we don't actually need to mock storage calls
 		// because the Get method for SD blobs reconstructs from DB data only
@@ -210,7 +217,7 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 		data, err := store.Get(sdBlob.HashHex())
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 
 		// The returned data should be a reconstructed SD blob with blob info
 		// We can't directly compare with originalTestData because the structure
@@ -218,11 +225,11 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 		// Instead, we verify it's a valid SD blob that can be parsed
 		parsedSdBlob := stream.SDBlob{}
 		err = parsedSdBlob.FromBlob(data)
-		assert.NoError(t, err)
-		assert.Equal(t, "test_stream", parsedSdBlob.StreamName)
-		assert.Equal(t, "video", parsedSdBlob.StreamType)
-		assert.Equal(t, "test_video.mp4", parsedSdBlob.SuggestedFileName)
-		assert.Equal(t, []byte("test_encryption_key"), parsedSdBlob.Key)
+		ast.NoError(err)
+		ast.Equal("test_stream", parsedSdBlob.StreamName)
+		ast.Equal("video", parsedSdBlob.StreamType)
+		ast.Equal("test_video.mp4", parsedSdBlob.SuggestedFileName)
+		ast.Equal([]byte("test_encryption_key"), parsedSdBlob.Key)
 
 		// Verify that blob info was included in the reconstructed blob
 		// The exact assertion depends on how the stream package handles this
@@ -233,11 +240,13 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 func TestLBRYBlobStore_Get_SDBlobNoAssociatedBlobs(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Create test SD blob data
@@ -250,7 +259,7 @@ func TestLBRYBlobStore_Get_SDBlobNoAssociatedBlobs(t *testing.T) {
 
 		// Serialize the SDBlob to its binary format
 		testData, err := sdBlob.ToBlob()
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create stream in DB (no associated blobs)
 		stream := db.Stream{
@@ -262,28 +271,30 @@ func TestLBRYBlobStore_Get_SDBlobNoAssociatedBlobs(t *testing.T) {
 			KeyData:           sdBlob.Key,
 		}
 		err = ctx.DB().Create(&stream).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Act
 		data, err := store.Get(sdBlob.HashHex())
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 		// Should return serialized SD blob data
-		assert.Equal(t, testData, data)
+		ast.Equal(testData, data)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Get_SDBlobMissingAssociatedBlobs(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Create test SD blob data
@@ -296,7 +307,7 @@ func TestLBRYBlobStore_Get_SDBlobMissingAssociatedBlobs(t *testing.T) {
 
 		// Serialize the SDBlob to its binary format
 		testData, err := sdBlob.ToBlob()
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create stream in DB
 		stream := db.Stream{
@@ -308,7 +319,7 @@ func TestLBRYBlobStore_Get_SDBlobMissingAssociatedBlobs(t *testing.T) {
 			KeyData:           sdBlob.Key,
 		}
 		err = ctx.DB().Create(&stream).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create stream_blob association with a blob that doesn't exist
 		streamBlob := db.StreamBlob{
@@ -317,28 +328,30 @@ func TestLBRYBlobStore_Get_SDBlobMissingAssociatedBlobs(t *testing.T) {
 			BlobNumber: 0,
 		}
 		err = ctx.DB().Create(&streamBlob).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Act
 		data, err := store.Get(sdBlob.HashHex())
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 		// Should still return serialized SD blob data even with missing blobs
-		assert.Equal(t, testData, data)
+		ast.Equal(testData, data)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Get_StreamMetadataError(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data - hash that doesn't exist in DB
@@ -348,22 +361,24 @@ func TestLBRYBlobStore_Get_StreamMetadataError(t *testing.T) {
 		data, err := store.Get(testHash)
 
 		// Assert
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not found in local storage")
-		assert.Nil(t, data)
+		ast.Error(err)
+		ast.Contains(err.Error(), "not found in local storage")
+		ast.Nil(data)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Put(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -372,7 +387,7 @@ func TestLBRYBlobStore_Put(t *testing.T) {
 
 		// Set up mock expectations
 		_, err = LBRYHashToHash(testHash)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		mockStorage.EXPECT().UploadObject(mock.Anything, mock.Anything).
 			Return(nil, nil)
@@ -381,24 +396,26 @@ func TestLBRYBlobStore_Put(t *testing.T) {
 		err = store.Put(testHash, testData)
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 
 		// Check that blob was inserted into DB
 		var blob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&blob).Error
-		assert.NoError(t, err)
-		assert.Equal(t, testHash, blob.BlobHash)
-		assert.Equal(t, len(testData), blob.BlobSize)
+		ast.NoError(err)
+		ast.Equal(testHash, blob.BlobHash)
+		ast.Equal(len(testData), blob.BlobSize)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_PutSD(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a proper SDBlob structure
 		// Since we're working with the actual liblbry stream package,
@@ -413,7 +430,7 @@ func TestLBRYBlobStore_PutSD(t *testing.T) {
 		// Serialize the SDBlob to its binary format
 		// This simulates what would happen with a real SD blob
 		testData, err := sdBlob.ToBlob()
-		require.NoError(t, err)
+		req.NoError(err)
 
 		hash := sdBlob.HashHex()
 
@@ -421,39 +438,43 @@ func TestLBRYBlobStore_PutSD(t *testing.T) {
 		err = store.PutSD(sdBlob.HashHex(), testData)
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 
 		// Check that stream was inserted into DB with correct values
 		var _stream db.Stream
 		err = ctx.DB().Where("sd_hash = ?", hash).First(&_stream).Error
-		assert.NoError(t, err)
-		assert.Equal(t, hash, _stream.StreamHash)
-		assert.Equal(t, "test_stream", _stream.StreamName)
-		assert.Equal(t, "video", _stream.StreamType)
-		assert.Equal(t, "test_video.mp4", _stream.SuggestedFileName)
-		assert.Equal(t, sdBlob.Key, _stream.KeyData)
+		ast.NoError(err)
+		ast.Equal(hash, _stream.StreamHash)
+		ast.Equal("test_stream", _stream.StreamName)
+		ast.Equal("video", _stream.StreamType)
+		ast.Equal("test_video.mp4", _stream.SuggestedFileName)
+		ast.Equal(sdBlob.Key, _stream.KeyData)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Name(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Act
 		name := store.Name()
 
 		// Assert
-		assert.Equal(t, BLOBSTORE_NAME, name)
+		ast.Equal(BLOBSTORE_NAME, name)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_List(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Insert some test data
 		blob1 := db.Blob{
@@ -466,30 +487,32 @@ func TestLBRYBlobStore_List(t *testing.T) {
 		}
 
 		err = ctx.DB().Create(&blob1).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		err = ctx.DB().Create(&blob2).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Act
 		results, err := store.List(0, 10)
 
 		// Assert
-		assert.NoError(t, err)
-		assert.NotNil(t, results)
+		ast.NoError(err)
+		ast.NotNil(results)
 		// We can't easily predict the exact order due to UNION ALL, so just check it doesn't panic
-		assert.GreaterOrEqual(t, len(results), 2)
+		ast.GreaterOrEqual(len(results), 2)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Delete(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -497,7 +520,7 @@ func TestLBRYBlobStore_Delete(t *testing.T) {
 
 		// Set up mock expectations
 		storageHash, err := LBRYHashToHash(testHash)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		mockStorage.EXPECT().DeleteObject(mock.Anything, mock.Anything, storageHash).
 			Return(nil)
@@ -508,32 +531,34 @@ func TestLBRYBlobStore_Delete(t *testing.T) {
 			BlobSize: 100,
 		}
 		err = ctx.DB().Create(&blob).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Act
 		err = store.Delete(testHash)
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 
 		// Check that blob was deleted from DB
 		var deletedBlob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&deletedBlob).Error
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
+		ast.Error(err)
+		ast.True(errors.Is(err, gorm.ErrRecordNotFound))
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Get_StorageError(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -545,11 +570,11 @@ func TestLBRYBlobStore_Get_StorageError(t *testing.T) {
 			BlobSize: 100,
 		}
 		err = ctx.DB().Create(&blob).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Set up mock expectations for storage error
 		storageHash, err := LBRYHashToHash(testHash)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).
 			Return(nil, fmt.Errorf("storage connection failed"))
@@ -558,22 +583,24 @@ func TestLBRYBlobStore_Get_StorageError(t *testing.T) {
 		data, err := store.Get(testHash)
 
 		// Assert
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to download blob")
-		assert.Nil(t, data)
+		ast.Error(err)
+		ast.Contains(err.Error(), "failed to download blob")
+		ast.Nil(data)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Put_StorageFailure(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -588,25 +615,27 @@ func TestLBRYBlobStore_Put_StorageFailure(t *testing.T) {
 		err = store.Put(testHash, testData)
 
 		// Assert
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to store blob")
-		assert.Contains(t, err.Error(), "upload failed")
+		ast.Error(err)
+		ast.Contains(err.Error(), "failed to store blob")
+		ast.Contains(err.Error(), "upload failed")
 
 		// Verify blob was not stored in DB
 		var blob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&blob).Error
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
+		ast.Error(err)
+		ast.True(errors.Is(err, gorm.ErrRecordNotFound))
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_PutSD_InvalidBlobData(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Test with invalid blob data
 		invalidData := []byte("this is not valid SD blob data")
@@ -615,19 +644,21 @@ func TestLBRYBlobStore_PutSD_InvalidBlobData(t *testing.T) {
 		err = store.PutSD("invalid_hash", invalidData)
 
 		// Assert
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to parse SD blob")
+		ast.Error(err)
+		ast.Contains(err.Error(), "failed to parse SD blob")
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Delete_StorageError(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -635,7 +666,7 @@ func TestLBRYBlobStore_Delete_StorageError(t *testing.T) {
 
 		// Set up mock expectations for storage error
 		storageHash, err := LBRYHashToHash(testHash)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		mockStorage.EXPECT().DeleteObject(mock.Anything, mock.Anything, storageHash).
 			Return(fmt.Errorf("storage delete failed: network timeout"))
@@ -646,34 +677,36 @@ func TestLBRYBlobStore_Delete_StorageError(t *testing.T) {
 			BlobSize: 100,
 		}
 		err = ctx.DB().Create(&blob).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Act
 		err = store.Delete(testHash)
 
 		// Assert
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to delete blob from storage")
-		assert.Contains(t, err.Error(), "network timeout")
+		ast.Error(err)
+		ast.Contains(err.Error(), "failed to delete blob from storage")
+		ast.Contains(err.Error(), "network timeout")
 
 		// Verify blob still exists in DB (partial failure scenario)
 		var deletedBlob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&deletedBlob).Error
-		assert.NoError(t, err)
-		assert.Equal(t, testHash, deletedBlob.BlobHash)
+		ast.NoError(err)
+		ast.Equal(testHash, deletedBlob.BlobHash)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Put_EmptyData(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test with empty data
@@ -688,27 +721,29 @@ func TestLBRYBlobStore_Put_EmptyData(t *testing.T) {
 		err = store.Put(testHash, emptyData)
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 
 		// Check that blob was inserted into DB with size 0
 		var blob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&blob).Error
-		assert.NoError(t, err)
-		assert.Equal(t, testHash, blob.BlobHash)
-		assert.Equal(t, 0, blob.BlobSize)
+		ast.NoError(err)
+		ast.Equal(testHash, blob.BlobHash)
+		ast.Equal(0, blob.BlobSize)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Put_NilData(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test with nil data
@@ -722,27 +757,29 @@ func TestLBRYBlobStore_Put_NilData(t *testing.T) {
 		err = store.Put(testHash, nil)
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 
 		// Check that blob was inserted into DB with size 0
 		var blob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&blob).Error
-		assert.NoError(t, err)
-		assert.Equal(t, testHash, blob.BlobHash)
-		assert.Equal(t, 0, blob.BlobSize)
+		ast.NoError(err)
+		ast.Equal(testHash, blob.BlobHash)
+		ast.Equal(0, blob.BlobSize)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Get_NotInDB(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data - blob not in DB
@@ -756,27 +793,29 @@ func TestLBRYBlobStore_Get_NotInDB(t *testing.T) {
 		data, err := store.Get(testHash)
 
 		// Assert
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "not found in local storage")
-		assert.Nil(t, data)
+		ast.Error(err)
+		ast.Contains(err.Error(), "not found in local storage")
+		ast.Nil(data)
 
 		// Verify storage was never called
 		// Note: We can't easily assert that storage wasn't called with testify/mock
 		// But we know from the logic that if the blob isn't in DB, we return early
 		// So we just verify the error condition
 
-		// No need to call mockStorage.AssertExpectations(t) because it shouldn't be called
+		// No need to call mockStorage.AssertExpectations(tb) because it shouldn't be called
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_Put_LargeBlob(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Create large test data (>1MB)
@@ -795,24 +834,26 @@ func TestLBRYBlobStore_Put_LargeBlob(t *testing.T) {
 		err = store.Put(testHash, largeData)
 
 		// Assert
-		assert.NoError(t, err)
+		ast.NoError(err)
 
 		// Check that blob was inserted into DB with correct size
 		var blob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&blob).Error
-		assert.NoError(t, err)
-		assert.Equal(t, testHash, blob.BlobHash)
-		assert.Equal(t, len(largeData), blob.BlobSize)
+		ast.NoError(err)
+		ast.Equal(testHash, blob.BlobHash)
+		ast.Equal(len(largeData), blob.BlobSize)
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_List_PaginationEdgeCases(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Insert some test data
 		blob1 := db.Blob{
@@ -825,47 +866,49 @@ func TestLBRYBlobStore_List_PaginationEdgeCases(t *testing.T) {
 		}
 
 		err = ctx.DB().Create(&blob1).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		err = ctx.DB().Create(&blob2).Error
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Test with offset beyond available records
 		results, err := store.List(10, 5)
-		assert.NoError(t, err)
+		ast.NoError(err)
 		// Should return empty slice, not panic
-		assert.Len(t, results, 0)
+		ast.Len(results, 0)
 
 		// Test with limit 0
 		results, err = store.List(0, 0)
-		assert.NoError(t, err)
+		ast.NoError(err)
 		// Should return empty slice, not panic
-		assert.Len(t, results, 0)
+		ast.Len(results, 0)
 
 		// Test with negative offset (should behave like offset 0)
 		results, err = store.List(-5, 5)
-		assert.NoError(t, err)
+		ast.NoError(err)
 		// Should return first 5 items (or however many exist)
-		assert.GreaterOrEqual(t, len(results), 0)
-		assert.LessOrEqual(t, len(results), 2)
+		ast.GreaterOrEqual(len(results), 0)
+		ast.LessOrEqual(len(results), 2)
 
 		// Test with negative limit (should behave like limit 10)
 		results, err = store.List(0, -10)
-		assert.NoError(t, err)
+		ast.NoError(err)
 		// Should return up to 10 items
-		assert.GreaterOrEqual(t, len(results), 0)
-		assert.LessOrEqual(t, len(results), 2)
+		ast.GreaterOrEqual(len(results), 0)
+		ast.LessOrEqual(len(results), 2)
 	}, testConfig)
 }
 
 func TestLBRYBlobStore_PartialFailure_DBSuccessStorageFailure(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
+		req := require.New(tb)
+		ast := assert.New(tb)
 		store, err := NewLBRYBlobStore(ctx)
-		require.NoError(t, err)
+		req.NoError(err)
 
 		// Create a mock storage service that will fail
-		mockStorage := coreMocks.NewMockStorageService(t)
+		mockStorage := coreMocks.NewMockStorageService(tb)
 		store.storageSvc = mockStorage
 
 		// Test data
@@ -880,16 +923,16 @@ func TestLBRYBlobStore_PartialFailure_DBSuccessStorageFailure(t *testing.T) {
 		err = store.Put(testHash, testData)
 
 		// Assert
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "storage quota exceeded")
+		ast.Error(err)
+		ast.Contains(err.Error(), "storage quota exceeded")
 
 		// Verify blob was not stored in DB (since storage failed)
 		var blob db.Blob
 		err = ctx.DB().Where("blob_hash = ?", testHash).First(&blob).Error
-		assert.Error(t, err)
-		assert.True(t, errors.Is(err, gorm.ErrRecordNotFound))
+		ast.Error(err)
+		ast.True(errors.Is(err, gorm.ErrRecordNotFound))
 
-		// No need to call mockStorage.AssertExpectations(t)
+		// No need to call mockStorage.AssertExpectations(tb)
 	}, testConfig)
 }
 

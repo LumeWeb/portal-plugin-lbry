@@ -92,7 +92,7 @@ func buildServer(ctx core.Context) (server.Server, error) {
 		return nil, err
 	}
 
-	// Create configuration with the storage path
+	// Create empty config (unused by CreateStore)
 	cfg := koanf.New(".")
 
 	// Create the disk store
