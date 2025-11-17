@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -61,7 +62,7 @@ func (bs *BlobStore) Has(hash string) (bool, error) {
 	// If we have metadata, check if the actual data exists in storage
 	if count > 0 {
 		// Parse the storage hash
-		storageHash, err := LBRYHashToHash(hash)
+		storageHash, err := internal.LBRYHashToStorageHash(hash)
 		if err != nil {
 			return false, fmt.Errorf("failed to parse storage hash for blob %q: %w", hash, err)
 		}
@@ -197,7 +198,7 @@ func (bs *BlobStore) getRegularBlob(hash string) ([]byte, error) {
 	}
 
 	// Parse the storage hash
-	storageHash, err := LBRYHashToHash(hash)
+	storageHash, err := internal.LBRYHashToStorageHash(hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse storage hash for blob %q: %w", hash, err)
 	}
@@ -234,7 +235,7 @@ func (bs *BlobStore) hasBlobMetadata(hash string) (int64, error) {
 // Put stores a blob with the given hash and data
 func (bs *BlobStore) Put(hash string, data []byte) error {
 	// Convert the hash using stream.ToMultihash
-	sh, err := LBRYHashToHash(hash)
+	sh, err := internal.LBRYHashToStorageHash(hash)
 	if err != nil {
 		return fmt.Errorf("failed to convert hash %q: %w", hash, err)
 	}
@@ -278,7 +279,7 @@ func (bs *BlobStore) PutSD(hash string, data []byte) error {
 	// Create a stream from the parsed blob data
 	// KeyData should contain the encryption key, not the raw data
 	_stream := pluginDb.Stream{
-		StreamHash:        hash,
+		StreamHash:        hex.EncodeToString(sdBlob.StreamHash),
 		SDHash:            hash,
 		StreamName:        sdBlob.StreamName,
 		StreamType:        sdBlob.StreamType,
@@ -335,7 +336,7 @@ func (bs *BlobStore) List(offset, limit int) ([]string, error) {
 // Delete removes a blob by its hash
 func (bs *BlobStore) Delete(hash string) error {
 	// Parse the storage hash
-	storageHash, err := LBRYHashToHash(hash)
+	storageHash, err := internal.LBRYHashToStorageHash(hash)
 	if err != nil {
 		return fmt.Errorf("failed to parse storage hash for blob %q: %w", hash, err)
 	}
