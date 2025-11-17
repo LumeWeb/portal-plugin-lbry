@@ -12,15 +12,25 @@ var BootstrapPeers = []string{
 }
 
 type ProtocolConfig struct {
-	Peers []string `config:"peers"`
+	Peers         []string `config:"peers"`
+	PeerPort      uint     `config:"peer_port"`
+	ReflectorPort uint     `config:"reflector_port"`
+	DHTPort       uint     `config:"dht_port"`
 }
 
 func (c ProtocolConfig) Defaults() map[string]any {
-	return map[string]any{}
+	return map[string]any{
+		"PeerPort":      5567,
+		"ReflectorPort": 5666,
+		"DHTPort":       4444,
+	}
 }
 
 func (c ProtocolConfig) Schema() z.ZogSchema {
 	return z.Struct(z.Shape{
-		"Peers": z.Slice(z.String()),
+		"Peers":         z.Slice(z.String()),
+		"PeerPort":      z.Uint(),
+		"ReflectorPort": z.Uint(),
+		"DHTPort":       z.Uint(),
 	})
 }

@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -75,7 +76,7 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 		req.NoError(err)
 
 		// Set up mock expectation for when blob exists in DB but not in storage
-		storageHash, err := LBRYHashToHash(testHash)
+		storageHash, err := internal.LBRYHashToStorageHash(testHash)
 		req.NoError(err)
 
 		mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).Return(nil, fmt.Errorf("object not found"))
@@ -124,7 +125,7 @@ func TestLBRYBlobStore_Get(t *testing.T) {
 		req.NoError(err)
 
 		// Set up mock expectations
-		storageHash, err := LBRYHashToHash(testHash)
+		storageHash, err := internal.LBRYHashToStorageHash(testHash)
 		req.NoError(err)
 
 		mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).
@@ -386,7 +387,7 @@ func TestLBRYBlobStore_Put(t *testing.T) {
 		testData := []byte(testData2)
 
 		// Set up mock expectations
-		_, err = LBRYHashToHash(testHash)
+		_, err = internal.LBRYHashToStorageHash(testHash)
 		req.NoError(err)
 
 		mockStorage.EXPECT().UploadObject(mock.Anything, mock.Anything).
@@ -444,7 +445,7 @@ func TestLBRYBlobStore_PutSD(t *testing.T) {
 		var _stream db.Stream
 		err = ctx.DB().Where("sd_hash = ?", hash).First(&_stream).Error
 		ast.NoError(err)
-		ast.Equal(hash, _stream.StreamHash)
+		ast.Equal(hex.EncodeToString(sdBlob.StreamHash), _stream.StreamHash)
 		ast.Equal("test_stream", _stream.StreamName)
 		ast.Equal("video", _stream.StreamType)
 		ast.Equal("test_video.mp4", _stream.SuggestedFileName)
@@ -519,7 +520,7 @@ func TestLBRYBlobStore_Delete(t *testing.T) {
 		testHash := testBlobHash2
 
 		// Set up mock expectations
-		storageHash, err := LBRYHashToHash(testHash)
+		storageHash, err := internal.LBRYHashToStorageHash(testHash)
 		req.NoError(err)
 
 		mockStorage.EXPECT().DeleteObject(mock.Anything, mock.Anything, storageHash).
@@ -573,7 +574,7 @@ func TestLBRYBlobStore_Get_StorageError(t *testing.T) {
 		req.NoError(err)
 
 		// Set up mock expectations for storage error
-		storageHash, err := LBRYHashToHash(testHash)
+		storageHash, err := internal.LBRYHashToStorageHash(testHash)
 		req.NoError(err)
 
 		mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).
@@ -665,7 +666,7 @@ func TestLBRYBlobStore_Delete_StorageError(t *testing.T) {
 		testHash := testBlobHash2
 
 		// Set up mock expectations for storage error
-		storageHash, err := LBRYHashToHash(testHash)
+		storageHash, err := internal.LBRYHashToStorageHash(testHash)
 		req.NoError(err)
 
 		mockStorage.EXPECT().DeleteObject(mock.Anything, mock.Anything, storageHash).
