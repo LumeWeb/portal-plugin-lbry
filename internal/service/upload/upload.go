@@ -174,7 +174,7 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 
 	// Find the stream
 	var _stream db.Stream
-	if err = s.db.First(&_stream, db.Stream{SDHash: lbryHash}).Error; err != nil {
+	if err = s.db.WithContext(ctx).First(&_stream, db.Stream{SDHash: lbryHash}).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("stream not found: %s", sdHash)
 		}

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/samber/lo"
 	"go.lumeweb.com/liblbry/server"
 	"go.lumeweb.com/liblbry/stream"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
@@ -111,7 +110,7 @@ func (h *PostUploadOperationHandler) Execute(ctx context.Context, req *models.Re
 		return fmt.Errorf("failed to add SDBlob to blob manager: %w", err)
 	}
 
-	userID := lo.FromPtrOr(req.UserID, 0)
+	userID := *req.UserID
 	uploadSvc := core.GetService[pluginCore.UploadService](h.Context(), pluginCore.UPLOAD_SERVICE)
 
 	if uploadSvc == nil {

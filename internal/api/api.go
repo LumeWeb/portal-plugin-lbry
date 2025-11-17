@@ -125,8 +125,8 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 		return nil
 	}
 
-	// Set filename from prepared upload if SuggestedFileName is empty
-	if metadata.SuggestedFileName == "" {
+	// Set filename from prepared upload if Filename is empty
+	if metadata.Filename == "" {
 		metadata.Filename = upload.Filename
 	}
 

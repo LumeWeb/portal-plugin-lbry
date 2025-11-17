@@ -173,6 +173,50 @@ func createMalformedMultipartRequest(ctx coreTesting.TestContext, t *testing.T, 
 	return req
 }
 
+func createMalformedMultipartRequestWithMetadata(ctx coreTesting.TestContext, t *testing.T, method, url, content, filename, token string, streamName, suggestedFileName string) *http.Request {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Create metadata
+	metadata := &dto.StreamMetadataRequest{
+		StreamName:        streamName,
+		SuggestedFileName: suggestedFileName,
+	}
+
+	// Marshal metadata to JSON
+	metadataJSON, err := json.Marshal(metadata)
+	require.NoError(t, err)
+
+	// Add metadata as "meta" form field
+	metaPart, err := writer.CreateFormField("meta")
+	require.NoError(t, err)
+	_, err = metaPart.Write(metadataJSON)
+	require.NoError(t, err)
+
+	// Add file content as "file" form field
+	filePart, err := writer.CreateFormFile("file", filename)
+	require.NoError(t, err)
+	_, err = filePart.Write([]byte(content))
+	require.NoError(t, err)
+
+	err = writer.Close()
+	require.NoError(t, err)
+
+	// Corrupt the multipart data by removing the final boundary
+	validData := body.Bytes()
+	boundary := writer.Boundary()
+	corruptedData := validData[:len(validData)-len("--"+boundary+"--\r\n")]
+
+	req := ctx.NewAPIRequest(method, url, corruptedData)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+
+	if token != "" {
+		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	}
+
+	return req
+}
+
 // createMultipartRequestWithMetadata creates a multipart request with both file content and stream metadata
 func createMultipartRequestWithMetadata(ctx coreTesting.TestContext, t *testing.T, method, url, content, filename, token string, streamName, suggestedFileName string) *http.Request {
 	body := &bytes.Buffer{}
@@ -297,8 +341,8 @@ func TestAPI_handleStreamUpload_LargeFile(t *testing.T) {
 		// Create a large test file (larger than typical limits)
 		largeContent := strings.Repeat("This is test content for a large file. ", 10000) // ~400KB
 
-		// Make HTTP request using helper
-		req := createMultipartRequest(ctx, t, http.MethodPost, "/api/streams/upload", largeContent, "large.txt", token)
+		// Make HTTP request using helper with metadata to ensure metadata validation passes
+		req := createMultipartRequestWithMetadata(ctx, t, http.MethodPost, "/api/streams/upload", largeContent, "large.txt", token, "large-stream", "large-file.txt")
 		rec := httptest.NewRecorder()
 		ctx.Router().ServeHTTP(rec, req)
 
@@ -310,7 +354,7 @@ func TestAPI_handleStreamUpload_LargeFile(t *testing.T) {
 			assert.NoError(t, err)
 			assert.NotEmpty(t, response.UploadHash)
 		} else {
-			// If it fails, it should be due to size limit
+			// If it fails, it should be due to size limit (not missing metadata)
 			assert.Equal(t, http.StatusBadRequest, rec.Code)
 		}
 	}, getTestOptions(), coreTesting.WithMockS3())
@@ -321,13 +365,14 @@ func TestAPI_handleStreamUpload_InvalidContentType(t *testing.T) {
 		token, _ := createTestUserAndLogin(ctx)
 
 		// Make HTTP request with invalid content type using helper
+		// This test specifically targets content-type validation failure, not metadata validation
 		req := ctx.NewAPIRequest(http.MethodPost, "/api/streams/upload", []byte("not multipart"))
 		setAuthHeader(req, token)
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		ctx.Router().ServeHTTP(rec, req)
 
-		// Verify response - should be bad request
+		// Verify response - should be bad request due to invalid content type
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	}, getTestOptions(), coreTesting.WithMockS3())
 }
@@ -336,8 +381,9 @@ func TestAPI_handleStreamUpload_MalformedMultipart(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
 		token, _ := createTestUserAndLogin(ctx)
 
-		// Make HTTP request with malformed multipart using helper
-		req := createMalformedMultipartRequest(ctx, t, http.MethodPost, "/api/streams/upload", "test content", "test.txt", token)
+		// Make HTTP request with malformed multipart using helper that includes metadata
+		// This test specifically targets multipart parsing failure, not metadata validation
+		req := createMalformedMultipartRequestWithMetadata(ctx, t, http.MethodPost, "/api/streams/upload", "test content", "test.txt", token, "malformed-stream", "malformed-file.txt")
 		rec := httptest.NewRecorder()
 		ctx.Router().ServeHTTP(rec, req)
 

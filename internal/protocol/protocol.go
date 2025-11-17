@@ -286,12 +286,18 @@ func buildServer(ctx core.Context) (server.Server, error) {
 		dhtAddress = net.JoinHostPort(publicIP, fmt.Sprintf("%d", protoCfg.DHTPort))
 	}
 
-	return server.NewServerBuilder().
+	builder := server.NewServerBuilder().
 		WithStorage(store).
-		WithPeer(int(protoCfg.PeerPort)).
-		WithReflector(int(protoCfg.ReflectorPort)).
 		WithDHT().
 		WithDHTAddress(dhtAddress).
 		WithDHTSeedNodes(seedNodes...).
-		WithLogger(ctx.Logger().Logger).Build()
+		WithLogger(ctx.Logger().Logger)
+
+	if protoCfg != nil {
+		builder = builder.
+			WithPeer(int(protoCfg.PeerPort)).
+			WithReflector(int(protoCfg.ReflectorPort))
+	}
+
+	return builder.Build()
 }
