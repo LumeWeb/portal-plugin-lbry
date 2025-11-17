@@ -7,7 +7,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.lumeweb.com/httputil"
 	"go.lumeweb.com/portal-middleware/auth/jwt"
-	"go.lumeweb.com/portal-middleware/context"
+	mcontext "go.lumeweb.com/portal-middleware/context"
 	"go.lumeweb.com/portal-middleware/middleware"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
@@ -149,6 +149,7 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 		// Pass the upload ID and metadata as workflow data for tracking
 		core.WithWorkflowStructData(&protocol.PostUploadWorkflowData{
 			UploadID: uploadID,
+			Size:     int64(upload.Size),
 			Meta:     metadata,
 		}, "json"),
 		// Associate the workflow with the authenticated user

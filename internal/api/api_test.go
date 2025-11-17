@@ -33,9 +33,18 @@ const (
 )
 
 func getTestOptions() coreTesting.TestContextBuilderOption {
-	var freePeerPort, _ = pluginTesting.GetFreePort()
-	var freeDhtPort, _ = pluginTesting.GetFreePort()
-	var freeReflectorPort, _ = pluginTesting.GetFreePort()
+	freePeerPort, err := pluginTesting.GetFreePort()
+	if err != nil {
+		panic(fmt.Sprintf("failed to get free peer port: %v", err))
+	}
+	freeDhtPort, err := pluginTesting.GetFreePort()
+	if err != nil {
+		panic(fmt.Sprintf("failed to get free DHT port: %v", err))
+	}
+	freeReflectorPort, err := pluginTesting.GetFreePort()
+	if err != nil {
+		panic(fmt.Sprintf("failed to get free reflector port: %v", err))
+	}
 	return coreTesting.CombineOptions(
 		coreTesting.WithServiceFactory(core.CRON_SERVICE, service.NewCronService),
 		coreTesting.WithServiceFactory(core.UPLOAD_SERVICE, service.NewMetadataService),
@@ -51,7 +60,7 @@ func getTestOptions() coreTesting.TestContextBuilderOption {
 		coreTesting.WithProtocol(internal.ProtocolName, protocol.NewProtocol),
 		coreTesting.WithConfig("plugin.lbry.protocol.peer_port", uint(freePeerPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.dht_port", uint(freeDhtPort)),
-		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeDhtPort)),
+		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeReflectorPort)),
 		coreTesting.WithProtocolConfig(internal.ProtocolName, pluginConfig.ProtocolConfig{
 			PeerPort:      uint(freePeerPort),
 			DHTPort:       uint(freeDhtPort),
@@ -165,7 +174,7 @@ func createMalformedMultipartRequest(ctx coreTesting.TestContext, t *testing.T, 
 }
 
 // createMultipartRequestWithMetadata creates a multipart request with both file content and stream metadata
-func createMultipartRequestWithMetadata(ctx coreTesting.TestContext, t *testing.T, method, url, content, filename, token string, streamName, streamType, suggestedFileName string) *http.Request {
+func createMultipartRequestWithMetadata(ctx coreTesting.TestContext, t *testing.T, method, url, content, filename, token string, streamName, suggestedFileName string) *http.Request {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
@@ -209,7 +218,7 @@ func TestAPI_handleStreamUpload_Success(t *testing.T) {
 		token, _ := createTestUserAndLogin(ctx)
 
 		// Make HTTP request using new helper with metadata
-		req := createMultipartRequestWithMetadata(ctx, t, http.MethodPost, "/api/streams/upload", "test lbry stream content", "test.txt", token, "test-stream", "video", "test-video.mp4")
+		req := createMultipartRequestWithMetadata(ctx, t, http.MethodPost, "/api/streams/upload", "test lbry stream content", "test.txt", token, "test-stream", "test-video.mp4")
 		rec := httptest.NewRecorder()
 		ctx.Router().ServeHTTP(rec, req)
 
@@ -227,11 +236,9 @@ func TestAPI_handleStreamUpload_Unauthorized(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
 		// Create test file upload without authentication
 		testContent := "test lbry stream content"
-		_, contentType := createTestFileUpload(t, testContent, "test.txt")
 
 		// Make HTTP request without auth header using helper
 		req := createMultipartRequest(ctx, t, http.MethodPost, "/api/streams/upload", testContent, "test.txt", "")
-		req.Header.Set("Content-Type", contentType)
 		rec := httptest.NewRecorder()
 		ctx.Router().ServeHTTP(rec, req)
 
@@ -244,11 +251,9 @@ func TestAPI_handleStreamUpload_InvalidToken(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
 		// Create test file upload with invalid token
 		testContent := "test lbry stream content"
-		_, contentType := createTestFileUpload(t, testContent, "test.txt")
 
 		// Make HTTP request with invalid token using helper
 		req := createMultipartRequest(ctx, t, http.MethodPost, "/api/streams/upload", testContent, "test.txt", "invalid-token")
-		req.Header.Set("Content-Type", contentType)
 		rec := httptest.NewRecorder()
 		ctx.Router().ServeHTTP(rec, req)
 

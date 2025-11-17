@@ -16,6 +16,7 @@ type ProtocolConfig struct {
 	PeerPort      uint     `config:"peer_port"`
 	ReflectorPort uint     `config:"reflector_port"`
 	DHTPort       uint     `config:"dht_port"`
+	PublicIP      string   `config:"public_ip"`
 }
 
 func (c ProtocolConfig) Defaults() map[string]any {
@@ -23,6 +24,7 @@ func (c ProtocolConfig) Defaults() map[string]any {
 		"PeerPort":      5567,
 		"ReflectorPort": 5666,
 		"DHTPort":       4444,
+		"PublicIP":      "",
 	}
 }
 
@@ -32,5 +34,6 @@ func (c ProtocolConfig) Schema() z.ZogSchema {
 		"PeerPort":      z.Uint(),
 		"ReflectorPort": z.Uint(),
 		"DHTPort":       z.Uint(),
+		"PublicIP":      z.String().Optional().IP(),
 	})
 }

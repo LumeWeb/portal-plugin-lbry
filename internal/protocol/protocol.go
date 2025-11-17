@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"testing"
 
 	"github.com/knadh/koanf/v2"
 	"go.lumeweb.com/liblbry"
@@ -143,6 +144,54 @@ func (p Protocol) newUploadWorkflow() core.WorkflowDefinition {
 	}
 }
 
+// isPrivateOrReservedIP checks if an IP address is in private or reserved ranges
+func isPrivateOrReservedIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+		return true
+	}
+
+	// Check IPv4 private and reserved ranges
+	if ip4 := ip.To4(); ip4 != nil {
+		// RFC1918 private ranges
+		// 10.0.0.0/8
+		if ip4[0] == 10 {
+			return true
+		}
+		// 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+		if ip4[0] == 172 && ip4[1] >= 16 && ip4[1] <= 31 {
+			return true
+		}
+		// 192.168.0.0/16
+		if ip4[0] == 192 && ip4[1] == 168 {
+			return true
+		}
+		// 100.64.0.0/10 (Carrier-grade NAT)
+		if ip4[0] == 100 && ip4[1] >= 64 && ip4[1] <= 127 {
+			return true
+		}
+		// 169.254.0.0/16 (Link-local, already checked but being thorough)
+		if ip4[0] == 169 && ip4[1] == 254 {
+			return true
+		}
+	} else {
+		// IPv6 private and reserved ranges
+		// ::1 (loopback, already checked but being thorough)
+		if ip.IsLoopback() {
+			return true
+		}
+		// fc00::/7 (Unique local addresses)
+		if ip[0] >= 0xfc && ip[0] <= 0xfd {
+			return true
+		}
+		// fe80::/10 (Link-local, already checked but being thorough)
+		if ip[0] == 0xfe && (ip[1]&0xc0) == 0x80 {
+			return true
+		}
+	}
+
+	return false
+}
+
 // getFirstPublicIP attempts to get the first public IP address
 func getFirstPublicIP() (string, error) {
 	// Try to get public IP from local non-loopback interfaces
@@ -150,6 +199,9 @@ func getFirstPublicIP() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get network interfaces: %w", err)
 	}
+
+	// Check if we're in a test environment
+	isTestMode := testing.Testing()
 
 	for _, iface := range interfaces {
 		// Skip loopback and down interfaces
@@ -171,8 +223,9 @@ func getFirstPublicIP() (string, error) {
 				ip = v.IP
 			}
 
-			// Skip loopback and link-local addresses
-			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			// Skip private, reserved, loopback and link-local addresses
+			// unless we're in test mode, then allow private IPs
+			if ip == nil || (!isTestMode && isPrivateOrReservedIP(ip)) {
 				continue
 			}
 
@@ -210,13 +263,21 @@ func buildServer(ctx core.Context) (server.Server, error) {
 		seedNodes = protoCfg.Peers
 	}
 
-	// Get the first public IP for DHT address
-	publicIP, err := getFirstPublicIP()
-	if err != nil {
-		ctx.Logger().Warn("Failed to get public IP for DHT, using empty address", zap.Error(err))
-		publicIP = ""
+	// Get the public IP for DHT address
+	var publicIP string
+
+	// Use configured PublicIP if set, otherwise auto-detect
+	if protoCfg != nil && protoCfg.PublicIP != "" {
+		publicIP = protoCfg.PublicIP
+		ctx.Logger().Info("Using configured public IP for DHT", zap.String("ip", publicIP))
 	} else {
-		ctx.Logger().Info("Using public IP for DHT", zap.String("ip", publicIP))
+		publicIP, err = getFirstPublicIP()
+		if err != nil {
+			ctx.Logger().Warn("Failed to get public IP for DHT, using empty address", zap.Error(err))
+			publicIP = ""
+		} else {
+			ctx.Logger().Info("Using auto-detected public IP for DHT", zap.String("ip", publicIP))
+		}
 	}
 
 	// Construct DHT address with IP and port

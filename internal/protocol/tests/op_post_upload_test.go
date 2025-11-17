@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/ipfs/go-cid"
 	"github.com/stretchr/testify/require"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
@@ -21,6 +22,7 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 		testData := []byte("This is test content for LBRY stream upload integration test")
 
 		proto := core.GetProtocol(internal.ProtocolName)
+		require.NotNil(tb, proto)
 
 		// Create a test user account
 		userSvc := core.GetService[core.UserService](ctx, core.USER_SERVICE)
@@ -36,7 +38,7 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 		uploadCID, uploadID, err := uploadService.HandleUpload(reqCtx, pluginTesting.NewReadSeekCloser(testData))
 		require.NoError(tb, err)
 		require.NotEmpty(tb, uploadID)
-		require.NotEqual(tb, uploadCID, nil)
+		require.NotEqual(tb, cid.Undef, uploadCID)
 
 		// Create a WorkflowTest instance
 		wfTest := coreTesting.NewWorkflowTest(ctx)

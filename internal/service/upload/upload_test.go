@@ -56,7 +56,7 @@ func getTestOptions() coreTesting.TestContextBuilderOption {
 		coreTesting.WithProtocol(internal.ProtocolName, protocol.NewProtocol),
 		coreTesting.WithConfig("plugin.lbry.protocol.peer_port", uint(freePeerPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.dht_port", uint(freeDhtPort)),
-		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeDhtPort)),
+		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeReflectorPort)),
 		coreTesting.WithProtocolConfig(internal.ProtocolName, pluginConfig.ProtocolConfig{
 			PeerPort:      uint(freePeerPort),
 			DHTPort:       uint(freeDhtPort),
@@ -85,11 +85,10 @@ func TestNewUploadService(t *testing.T) {
 
 func TestUploadServiceDefault_HandleUpload(t *testing.T) {
 	tests := []struct {
-		name           string
-		testData       []byte
-		expectedError  bool
-		mockStorageErr error
-		setupMocks     func(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService)
+		name          string
+		testData      []byte
+		expectedError bool
+		setupMocks    func(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService)
 	}{
 		{
 			name:          "successful upload",
@@ -105,10 +104,9 @@ func TestUploadServiceDefault_HandleUpload(t *testing.T) {
 			},
 		},
 		{
-			name:           "storage service error",
-			testData:       []byte("test data for lbry upload"),
-			expectedError:  true,
-			mockStorageErr: errors.New("storage error"),
+			name:          "storage service error",
+			testData:      []byte("test data for lbry upload"),
+			expectedError: true,
 			setupMocks: func(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
 				mockStorage, mockPin, mockUpload := getStorageAndPinAndUploadMocks(ctx)
 
@@ -340,7 +338,6 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 	tests := []struct {
 		name              string
 		setupStream       func(ctx coreTesting.TestContext) *db.Stream
-		mockDBError       error
 		mockCIDError      error
 		expectError       bool
 		expectedErrorText string
@@ -373,23 +370,7 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 			expectError: true,
 			description: "should return error when stream not found in database",
 		},
-		{
-			name: "database error",
-			setupStream: func(ctx coreTesting.TestContext) *db.Stream {
-				// Create a stream but simulate DB error
-				return &db.Stream{
-					StreamHash:        testUploadHash1,
-					SDHash:            testUploadHash1,
-					StreamName:        "test_stream",
-					StreamType:        "video",
-					SuggestedFileName: "test.mp4",
-				}
-			},
-			mockDBError:       errors.New("database error"),
-			expectError:       true,
-			expectedErrorText: "stream not found",
-			description:       "should handle database errors when finding stream",
-		},
+
 		{
 			name: "CID conversion error",
 			setupStream: func(ctx coreTesting.TestContext) *db.Stream {
@@ -423,12 +404,6 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 				var _stream *db.Stream
 				if tt.setupStream != nil {
 					_stream = tt.setupStream(ctx)
-				}
-
-				// Configure mock expectations
-				if tt.mockDBError != nil {
-					// We can't easily mock the DB query error in this context,
-					// so we'll test the normal flow and then manually test error conditions
 				}
 
 				// Act

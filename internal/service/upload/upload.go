@@ -91,15 +91,16 @@ func (s *UploadServiceDefault) HandleUpload(ctx context.Context, reader io.ReadS
 		return cid.Cid{}, "", fmt.Errorf("failed to hash reader: %w", err)
 	}
 
-	multihash, err := stream.ToMultihash(streamHash)
+	// Reset the reader to the beginning after hashing
+	_, err = reader.Seek(0, io.SeekStart)
 	if err != nil {
-		return cid.Cid{}, "", fmt.Errorf("failed to convert stream hash to multihash: %w", err)
+		return cid.Cid{}, "", fmt.Errorf("failed to seek to start of reader after hashing: %w", err)
 	}
 
-	// Create CID from the stream hash
-	streamCid, err := cid.Decode(multihash)
+	// Create CID from the stream hash using the internal helper
+	streamCid, err := internal.LBRYHashToCID(streamHash)
 	if err != nil {
-		return cid.Cid{}, "", fmt.Errorf("failed to decode multihash to CID: %w", err)
+		return cid.Cid{}, "", fmt.Errorf("failed to convert stream hash to CID: %w", err)
 	}
 
 	uploadId, err := s.storage.S3TemporaryUpload(ctx, reader, uint64(size), s.protocol.(core.StorageProtocol))
@@ -112,6 +113,11 @@ func (s *UploadServiceDefault) HandleUpload(ctx context.Context, reader io.ReadS
 
 // ProcessUpload creates upload records for given CIDs
 func (s *UploadServiceDefault) ProcessUpload(ctx context.Context, streamResult *stream.StreamResult, userId uint) error {
+	// Add defensive guard to ensure content hashes and chunk sizes match
+	if len(streamResult.ContentHashes) != len(streamResult.ChunkSizes) {
+		return fmt.Errorf("mismatched content hashes (%d) and chunk sizes (%d)", len(streamResult.ContentHashes), len(streamResult.ChunkSizes))
+	}
+
 	for index, c := range streamResult.ContentHashes {
 		_cid, err := internal.LBRYHashToCID(c)
 		if err != nil {
