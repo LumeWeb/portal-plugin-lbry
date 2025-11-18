@@ -59,6 +59,7 @@ func (p Protocol) GetProtocolPinModel() data_models.PinDataModel {
 func (p Protocol) Workflows() []core.WorkflowDefinition {
 	return []core.WorkflowDefinition{
 		p.newUploadWorkflow(),
+		p.newTUSUploadWorkflow(),
 	}
 }
 
