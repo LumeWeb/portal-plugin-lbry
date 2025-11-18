@@ -10,8 +10,8 @@ require (
 	github.com/samber/lo v1.52.0
 	github.com/stretchr/testify v1.11.1
 	go.lumeweb.com/httputil v0.5.3
-	go.lumeweb.com/liblbry v0.0.0-20251117174516-f00e0e77fc0f
-	go.lumeweb.com/portal v0.4.2-0.20251117151042-3dafc6fefbbe
+	go.lumeweb.com/liblbry v0.0.0-20251118044703-b78fd1f497bc
+	go.lumeweb.com/portal v0.4.2-0.20251118002214-4b70e6215a0b
 	go.lumeweb.com/portal-middleware v0.3.3
 	go.lumeweb.com/portal-router v0.6.8
 	go.uber.org/zap v1.27.0

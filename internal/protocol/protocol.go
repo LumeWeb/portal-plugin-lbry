@@ -11,11 +11,14 @@ import (
 	"github.com/knadh/koanf/v2"
 	"go.lumeweb.com/liblbry"
 	"go.lumeweb.com/liblbry/server"
+	"go.lumeweb.com/liblbry/stream"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
 	"go.lumeweb.com/portal/config"
 	"go.lumeweb.com/portal/core"
+	"go.lumeweb.com/portal/db/models"
 	"go.lumeweb.com/portal/db/models/data_models"
+	"go.lumeweb.com/portal/service"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -56,12 +59,43 @@ func (p Protocol) GetProtocolPinModel() data_models.PinDataModel {
 func (p Protocol) Workflows() []core.WorkflowDefinition {
 	return []core.WorkflowDefinition{
 		p.newUploadWorkflow(),
+		p.newTUSUploadWorkflow(),
 	}
 }
 
 func (p Protocol) Operations() []core.Operation {
 	return []core.Operation{
 		NewPostUploadOperation(p.ctx),
+		service.NewTUSOperationHandler(p.ctx, p, func(ctx context.Context, helper core.OperationHelper, request *models.Request, tsReq *models.TUSRequest) error {
+			// Validate user ID before processing
+			if request.UserID == nil || *request.UserID == 0 {
+				return fmt.Errorf("user ID is required")
+			}
+			userID := *request.UserID
+
+			// Get TUS handler
+			tusHandler := core.GetAPI(internal.ProtocolName).(core.APITusHandler).GetTusHandler()
+
+			// Create upload processor
+			processor := NewUploadProcessor(helper.Context())
+
+			// Create TUS upload source
+			source := NewTUSUploadSource(tusHandler, tsReq.TUSUploadID, helper.Protocol().(core.StorageProtocol))
+
+			// Initialize the source to fetch metadata and size
+			err := source.Initialize(ctx)
+			if err != nil {
+				return err
+			}
+
+			// Process the upload using shared processor
+			_, err = processor.ProcessStreamUpload(ctx, source, uint64(userID))
+			if err != nil {
+				return err
+			}
+
+			return nil
+		}),
 	}
 }
 
@@ -141,6 +175,28 @@ func (p Protocol) newUploadWorkflow() core.WorkflowDefinition {
 		Steps: []core.OperationStep{
 			p.newRetryStep(core.PostUploadOperationName(p.Name())),
 		},
+	}
+}
+
+func (p Protocol) newTUSUploadWorkflow() core.WorkflowDefinition {
+	return core.WorkflowDefinition{
+		Name:                 TUS_UPLOAD_WORKFLOW,
+		AutoTriggerFirstStep: true,
+		Steps: append([]core.OperationStep{
+			p.newRetryStep(core.TUSUploadOperationName(p.Name())),
+		}),
+	}
+}
+
+// applyMetadataToSDBlob applies metadata from TUS upload to an SD blob
+func applyMetadataToSDBlob(sdBlob *stream.SDBlob, metadata map[string]string) {
+	// Apply metadata from TUS upload
+	if streamName, ok := metadata["stream_name"]; ok && streamName != "" {
+		sdBlob.StreamName = streamName
+	}
+
+	if suggestedFileName, ok := metadata["suggested_file_name"]; ok && suggestedFileName != "" {
+		sdBlob.SuggestedFileName = suggestedFileName
 	}
 }
 
