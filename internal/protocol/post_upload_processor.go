@@ -30,7 +30,7 @@ func NewPostUploadSource(uploadID string, size int64, meta *dto.StreamMetadataRe
 }
 
 // GetReader returns the upload reader from storage
-func (p *PostUploadSource) GetReader(ctx context.Context, proto core.StorageProtocol) (io.ReadCloser, error) {
+func (p *PostUploadSource) GetReader(ctx context.Context, _ core.StorageProtocol) (io.ReadCloser, error) {
 	upload, err := p.storage.S3GetTemporaryUpload(ctx, p.protocol, p.uploadID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get upload: %w", err)

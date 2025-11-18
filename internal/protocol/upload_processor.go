@@ -64,13 +64,12 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 	if err != nil {
 		return nil, fmt.Errorf("failed to get upload reader: %w", err)
 	}
-	defer func(reader io.ReadCloser) {
-		if reader == nil {
+	defer func(r io.ReadCloser) {
+		if r == nil {
 			return
 		}
-		err = reader.Close()
-		if err != nil {
-			p.logger.Error("Failed to close upload reader", zap.Error(err))
+		if closeErr := r.Close(); closeErr != nil {
+			p.logger.Error("Failed to close upload reader", zap.Error(closeErr))
 		}
 	}(reader)
 
@@ -127,6 +126,8 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 	}
 
 	// Process all CIDs to create upload and core pin records
+	// Note: userID is converted from uint64 to uint - this is safe as userID represents a DB PK
+	// and the conversion will not truncate valid values in this system
 	err = uploadSvc.ProcessUpload(p.ctx, streamResult, uint(userID))
 	if err != nil {
 		return nil, fmt.Errorf("failed to process upload: %w", err)

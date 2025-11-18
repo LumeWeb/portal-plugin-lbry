@@ -46,10 +46,10 @@ func (t *TUSUploadSource) Initialize(ctx context.Context) error {
 }
 
 // GetReader returns the upload reader from TUS handler
-func (t *TUSUploadSource) GetReader(ctx context.Context, proto core.StorageProtocol) (io.ReadCloser, error) {
-	reader, err := t.tusHandler.UploadReader(ctx, t.tusUploadID, proto, 0)
+func (t *TUSUploadSource) GetReader(ctx context.Context, _ core.StorageProtocol) (io.ReadCloser, error) {
+	reader, err := t.tusHandler.UploadReader(ctx, t.tusUploadID, t.protocol, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get upload reader: %w", err)
+		return nil, fmt.Errorf("failed to get upload reader for %s: %w", t.tusUploadID, err)
 	}
 	return reader, nil
 }

@@ -28,6 +28,12 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 		userSvc := core.GetService[core.UserService](ctx, core.USER_SERVICE)
 		proto := core.GetProtocol(internal.ProtocolName)
 
+		// Validate test context setup
+		require.NotNil(tb, tusService, "TUS service should be available")
+		require.NotNil(tb, storageSvc, "Storage service should be available")
+		require.NotNil(tb, userSvc, "User service should be available")
+		require.NotNil(tb, proto, "Protocol should be available")
+
 		// --- Test Data Preparation ---
 		// Create test data that simulates an LBRY stream
 		testData := []byte(TestTUSStreamContent)
@@ -75,13 +81,14 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 				"suggested_file_name": "test-tus-video.mp4",
 			},
 		}
-		infoData := io.NopCloser(bytes.NewReader(mustMarshal(tb, fileInfo)))
+		infoBytes := mustMarshal(tb, fileInfo)
+		infoData := io.NopCloser(bytes.NewReader(infoBytes))
 		err = storageSvc.S3MultipartUpload(
 			ctx,
 			infoData,
 			ctx.Config().Config().Core.Storage.S3.BufferBucket,
 			storageSvc.GetTemporaryUploadPath(proto.(core.StorageProtocol), fmt.Sprintf("%s.info", objectId)),
-			uint64(len(mustMarshal(tb, fileInfo))),
+			uint64(len(infoBytes)),
 		)
 		require.NoError(tb, err)
 
@@ -103,10 +110,10 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 			0,
 			core.WithWorkflowStorageHash(storageHash),
 			core.WithWorkflowUserID(testUser.ID),
-			core.WithWorkflowSourceIP(TestSourceIP),
+			core.WithWorkflowSourceIP(uploaderIp),
 		)
 
-		req := wfTest.GetRequest(tusUpload.RequestID)
+		req := wfTest.GetRequest(tusUpload.GetRequestID())
 		wfTest.ExecuteWorkflowStep(req)
 		wfTest.CompleteWorkflowStep(req)
 
