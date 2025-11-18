@@ -59,11 +59,15 @@ func GetDbTestOptions() []coreTesting.TestContextBuilderOption {
 }
 
 func GetTUSUploadTestOptions() []coreTesting.TestContextBuilderOption {
-	return []coreTesting.TestContextBuilderOption{
-		coreTesting.CombineOptions(GetCommonTestOptions(), GetDbTestOptions(),
-			coreTesting.WithServiceFactory(core.TUS_SERVICE, service.NewTUSService),
-			coreTesting.WithAPI(internal.ProtocolName, api.NewAPI),
-			coreTesting.WithAPIConfig(internal.ProtocolName, &pluginConfig.APIConfig{}),
-			coreTesting.WithMockS3()),
-	}
+	combined := coreTesting.CombineOptions(GetCommonTestOptions(), GetDbTestOptions())
+
+	// Append individual options to the combined result
+	options := []coreTesting.TestContextBuilderOption{combined}
+	options = append(options,
+		coreTesting.WithServiceFactory(core.TUS_SERVICE, service.NewTUSService),
+		coreTesting.WithAPI(internal.ProtocolName, api.NewAPI),
+		coreTesting.WithAPIConfig(internal.ProtocolName, &pluginConfig.APIConfig{}),
+	)
+
+	return options
 }

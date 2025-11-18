@@ -72,7 +72,7 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 					TerminatedUploadHandler: service.TUSDefaultUploadTerminatedHandler(ctx),
 					CompletedUploadHandler: service.TUSDefaultUploadCompletedHandler(ctx, nil, protocol.TUS_UPLOAD_WORKFLOW,
 						func(handlr core.TusHandler, hook handler.HookEvent) (core.StorageHash, error) {
-							upload, err := api.tus.UploadReader(ctx, hook.Upload.ID, sproto, 0)
+							upload, err := handlr.UploadReader(ctx, hook.Upload.ID, sproto, 0)
 							if err != nil {
 								return nil, err
 							}

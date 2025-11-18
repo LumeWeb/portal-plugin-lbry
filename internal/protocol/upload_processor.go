@@ -46,8 +46,15 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 		return nil, fmt.Errorf("protocol does not implement StorageProtocol")
 	}
 
+	// Safely assert proto to *Protocol
+	pProto, ok := proto.(*Protocol)
+	if !ok {
+		return nil, fmt.Errorf("protocol is not of type *Protocol")
+	}
+
 	// Safely assert node to server.BlobManager
-	blobManager, ok := proto.(*Protocol).Node().(server.BlobManager)
+	node := pProto.Node()
+	blobManager, ok := node.(server.BlobManager)
 	if !ok {
 		return nil, fmt.Errorf("failed to cast node to server.BlobManager")
 	}
