@@ -19,6 +19,7 @@ var (
 	ErrKeyUploadFailed             core.ErrorType = "upload_failed"
 	ErrKeyStreamProcessingFailed   core.ErrorType = "stream_processing_failed"
 	ErrKeyEmptyFile                core.ErrorType = "empty_file"
+	ErrKeyInvalidSDHash            core.ErrorType = "invalid_sd_hash"
 )
 
 // ErrorDetails represents detailed error information
@@ -78,6 +79,7 @@ func init() {
 		ErrKeyUploadFailed:             {Key: ErrKeyUploadFailed, Message: "Stream upload failed"},
 		ErrKeyStreamProcessingFailed:   {Key: ErrKeyStreamProcessingFailed, Message: "Stream processing failed"},
 		ErrKeyEmptyFile:                {Key: ErrKeyEmptyFile, Message: "Uploaded file is empty"},
+		ErrKeyInvalidSDHash:            {Key: ErrKeyInvalidSDHash, Message: "Invalid SD hash format"},
 	})
 
 	// Register HTTP status codes using map-based approach
@@ -88,5 +90,6 @@ func init() {
 		ErrKeyUploadFailed:             http.StatusInternalServerError,
 		ErrKeyStreamProcessingFailed:   http.StatusInternalServerError,
 		ErrKeyEmptyFile:                http.StatusBadRequest,
+		ErrKeyInvalidSDHash:            http.StatusBadRequest,
 	})
 }

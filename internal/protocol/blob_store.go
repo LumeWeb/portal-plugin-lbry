@@ -33,9 +33,9 @@ type BlobStore struct {
 
 // NewLBRYBlobStore creates a new instance of BlobStore
 func NewLBRYBlobStore(ctx core.Context) (*BlobStore, error) {
-	proto, ok := core.GetProtocol(internal.ProtocolName).(core.StorageProtocol)
-	if !ok {
-		return nil, fmt.Errorf("protocol not found: %s", internal.ProtocolName)
+	proto, err := GetStorageProtocol()
+	if err != nil {
+		return nil, err
 	}
 
 	storageSvc := core.GetService[core.StorageService](ctx, core.STORAGE_SERVICE)

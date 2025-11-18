@@ -12,6 +12,7 @@ import (
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
+	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
 	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/portal/db/models"
 	"go.uber.org/zap"
@@ -103,7 +104,14 @@ func (s *UploadServiceDefault) HandleUpload(ctx context.Context, reader io.ReadS
 		return cid.Cid{}, "", fmt.Errorf("failed to convert stream hash to CID: %w", err)
 	}
 
-	uploadId, err := s.storage.S3TemporaryUpload(ctx, reader, uint64(size), s.protocol.(core.StorageProtocol))
+	// Cast to storage protocol with type safety
+	storageProtocol, err := protocol.CastToStorageProtocol(s.protocol)
+	if err != nil {
+		s.logger.Error("Failed to cast protocol to storage protocol", zap.Error(err))
+		return cid.Undef, "", fmt.Errorf("failed to cast protocol to storage protocol: %w", err)
+	}
+
+	uploadId, err := s.storage.S3TemporaryUpload(ctx, reader, uint64(size), storageProtocol)
 	if err != nil {
 		s.logger.Error("Failed to store upload data", zap.Error(err))
 		return cid.Undef, "", fmt.Errorf("failed to store upload data: %w", err)
