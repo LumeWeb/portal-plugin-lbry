@@ -3,6 +3,7 @@ package tests
 import (
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
+	"go.lumeweb.com/portal-plugin-lbry/internal/api"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db/migrations"
 	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
@@ -54,5 +55,15 @@ func GetDbTestOptions() []coreTesting.TestContextBuilderOption {
 		coreTesting.WithSQLitePluginMigrations(
 			internal.ProtocolName, migrations.GetSQLite(),
 		),
+	}
+}
+
+func GetTUSUploadTestOptions() []coreTesting.TestContextBuilderOption {
+	return []coreTesting.TestContextBuilderOption{
+		coreTesting.CombineOptions(GetCommonTestOptions(), GetDbTestOptions(),
+			coreTesting.WithServiceFactory(core.TUS_SERVICE, service.NewTUSService),
+			coreTesting.WithAPI(internal.ProtocolName, api.NewAPI),
+			coreTesting.WithAPIConfig(internal.ProtocolName, &pluginConfig.APIConfig{}),
+			coreTesting.WithMockS3()),
 	}
 }

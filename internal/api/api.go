@@ -1,11 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/tus/tusd/v2/pkg/handler"
 	"go.lumeweb.com/httputil"
+	lbrycrypto "go.lumeweb.com/liblbry/crypto"
 	"go.lumeweb.com/portal-middleware/auth/jwt"
 	mcontext "go.lumeweb.com/portal-middleware/context"
 	"go.lumeweb.com/portal-middleware/middleware"
@@ -17,9 +22,15 @@ import (
 	"go.lumeweb.com/portal-router"
 	"go.lumeweb.com/portal/config"
 	"go.lumeweb.com/portal/core"
+	"go.lumeweb.com/portal/event"
+	"go.lumeweb.com/portal/service"
+	"go.uber.org/zap"
 )
 
 var _ core.API = (*API)(nil)
+var _ core.APITusHandler = (*API)(nil)
+
+const TUS_HTTP_ROUTE = "/api/streams/upload/tus"
 
 type API struct {
 	ctx             core.Context
@@ -27,6 +38,7 @@ type API struct {
 	logger          *core.Logger
 	workflowService core.WorkflowService
 	uploadService   pluginCore.UploadService
+	tus             core.TusHandler
 }
 
 func (a *API) OpenAPIInfo() router.APIInfoDefinition {
@@ -45,6 +57,40 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 			api.workflowService = core.GetService[core.WorkflowService](ctx, core.WORKFLOW_SERVICE)
 			api.uploadService = core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
 
+			proto := core.GetProtocol(internal.ProtocolName)
+			sproto := proto.(core.StorageProtocol)
+			event.OnBootStartupFuncsCompleted(ctx, func(ctx core.Context) error {
+				var _tus core.TusHandler
+				var err error
+				_tus, err = service.CreateTusHandler(ctx, core.TUSHandlerConfig{
+					Protocol: proto,
+					BasePath: TUS_HTTP_ROUTE,
+					CreatedUploadHandler: service.TUSDefaultUploadCreatedHandler(ctx, func(hook handler.HookEvent, uploaderId uint) (core.StorageHash, error) {
+						return nil, nil
+					}, nil),
+					UploadProgressHandler:   service.TUSDefaultUploadProgressHandler(ctx),
+					TerminatedUploadHandler: service.TUSDefaultUploadTerminatedHandler(ctx),
+					CompletedUploadHandler: service.TUSDefaultUploadCompletedHandler(ctx, nil, protocol.TUS_UPLOAD_WORKFLOW,
+						func(handlr core.TusHandler, hook handler.HookEvent) (core.StorageHash, error) {
+							upload, err := api.tus.UploadReader(ctx, hook.Upload.ID, sproto, 0)
+							if err != nil {
+								return nil, err
+							}
+							defer closeUpload(upload, api.logger)
+
+							return getStreamUploadHash(upload, api.logger)
+						},
+					),
+				})
+
+				if err != nil {
+					return fmt.Errorf("failed to create tus handler: %w", err)
+				}
+				api.tus = _tus
+
+				return nil
+			})
+
 			return nil
 		}),
 	), nil
@@ -60,6 +106,10 @@ func (a *API) Subdomain() string {
 
 func (a *API) AuthTokenName() string {
 	return core.AUTH_TOKEN_NAME
+}
+
+func (a *API) GetTusHandler() core.TusHandler {
+	return a.tus
 }
 
 func (a *API) Config() config.APIConfig {
@@ -204,5 +254,46 @@ func (a *API) Configure(r router.Router, accessService core.AccessService) error
 		return err
 	}
 
+	err = a.tus.SetupRoute(r, a.Subdomain(), true, false, TUS_HTTP_ROUTE)
+	if err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func createStreamReader(data io.Reader) (io.Reader, error) {
+	// Read the first bytes into a buffer for validation
+	buf := make([]byte, 1024) // Adjust buffer size as needed for LBRY streams
+	n, err := io.ReadFull(data, buf)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+
+	// Create a bytes.Reader that supports ReaderAt
+	reader := bytes.NewReader(buf[:n])
+	return reader, nil
+}
+
+func closeUpload(upload io.ReadCloser, logger *core.Logger) {
+	err := upload.Close()
+	if err != nil {
+		logger.Error("Failed to close reader", zap.Error(err))
+	}
+}
+
+func getStreamUploadHash(upload io.ReadCloser, logger *core.Logger) (core.StorageHash, error) {
+	hash, err := lbrycrypto.NewHasher().HashReader(upload)
+	if err != nil {
+		logger.Error("Failed to hash stream upload", zap.Error(err))
+		return nil, fmt.Errorf("failed to hash stream upload: %w", err)
+	}
+
+	storageHash, err := internal.LBRYHashToStorageHash(hash)
+	if err != nil {
+		logger.Error("Failed to convert LBRY hash to storage hash", zap.Error(err), zap.String("hash", hash))
+		return nil, fmt.Errorf("failed to convert LBRY hash to storage hash: %w", err)
+	}
+
+	return storageHash, nil
 }

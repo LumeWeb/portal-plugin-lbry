@@ -19,14 +19,14 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
 		// Arrange
 		// Create test data that simulates an LBRY stream
-		testData := []byte("This is test content for LBRY stream upload integration test")
+		testData := []byte(TestStreamContent)
 
 		proto := core.GetProtocol(internal.ProtocolName)
 		require.NotNil(tb, proto)
 
 		// Create a test user account
 		userSvc := core.GetService[core.UserService](ctx, core.USER_SERVICE)
-		testUser, err := userSvc.CreateAccount("test@example.com", "testpassword123", false)
+		testUser, err := userSvc.CreateAccount(TestUserEmail, TestUserPassword, false)
 		require.NoError(tb, err)
 
 		// Get the upload service
@@ -47,7 +47,7 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 		req := wfTest.StartOperationWorkflow(core.PostUploadOperationName(proto.Name()),
 			core.WithWorkflowStorageHash(core.NewStorageHashFromRawMultihash(uploadCID.Hash())),
 			core.WithWorkflowUserID(testUser.ID),
-			core.WithWorkflowSourceIP("127.0.0.1"),
+			core.WithWorkflowSourceIP(TestSourceIP),
 			core.WithWorkflowStructData(protocol.PostUploadWorkflowData{
 				UploadID: uploadID,
 				Size:     int64(len(testData)),

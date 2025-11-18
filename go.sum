@@ -553,10 +553,14 @@ go.lumeweb.com/liblbry v0.0.0-20251117045611-716f703e58a8 h1:rL+Zp6Bnl71oqPifD9Z
 go.lumeweb.com/liblbry v0.0.0-20251117045611-716f703e58a8/go.mod h1:WTQPaHcRLCtXJqzecdv3u55u4n31Oa7DtoDFXO9tjHE=
 go.lumeweb.com/liblbry v0.0.0-20251117174516-f00e0e77fc0f h1:1AhCqbpVLuCDkwbaIIqMoKJ9knN31/ceFcnMoN5tdoQ=
 go.lumeweb.com/liblbry v0.0.0-20251117174516-f00e0e77fc0f/go.mod h1:jfE9nI9uwKhbaaHqXmYGSnsy/MNQSs7srUwcgqhXy0U=
+go.lumeweb.com/liblbry v0.0.0-20251118044703-b78fd1f497bc h1:Eql+yGsz3ABGZ9Wg9J81EY7QBcsVY/4bkyEieyjRZKg=
+go.lumeweb.com/liblbry v0.0.0-20251118044703-b78fd1f497bc/go.mod h1:jfE9nI9uwKhbaaHqXmYGSnsy/MNQSs7srUwcgqhXy0U=
 go.lumeweb.com/portal v0.4.2-0.20251016024057-ce880ca2d44d h1:V6sjZ9xNgrpKmE0sE3SsJm2mmvXToNmqvQBfpOSsFU4=
 go.lumeweb.com/portal v0.4.2-0.20251016024057-ce880ca2d44d/go.mod h1:LIAasK20WTe2M4oDbhHwx1wf59Qx5EWpG8cGVDRa4w0=
 go.lumeweb.com/portal v0.4.2-0.20251117151042-3dafc6fefbbe h1:BakX/HsuIV8DDdjT+EBfbl6ED9h59mZp7MPPtvtrLDQ=
 go.lumeweb.com/portal v0.4.2-0.20251117151042-3dafc6fefbbe/go.mod h1:LIAasK20WTe2M4oDbhHwx1wf59Qx5EWpG8cGVDRa4w0=
+go.lumeweb.com/portal v0.4.2-0.20251118002214-4b70e6215a0b h1:rzG1eOOIJ6KgqRt5V2FlvR3FjwpUvRQAaBBZG/fOqd0=
+go.lumeweb.com/portal v0.4.2-0.20251118002214-4b70e6215a0b/go.mod h1:LIAasK20WTe2M4oDbhHwx1wf59Qx5EWpG8cGVDRa4w0=
 go.lumeweb.com/portal-middleware v0.3.3 h1:hoqSOPGhKGS8yEULhccFHUFckkVjS0JduEFSVbn2X5A=
 go.lumeweb.com/portal-middleware v0.3.3/go.mod h1:FjxHJnUuSVlRF7SqWMm3QXEf5fgbZqfNrYUpCnUZ4kM=
 go.lumeweb.com/portal-router v0.6.8 h1:JSQZ6WfDJJgGQY1MFf1tV3mlp7SJPqTLibi/TxqxJvU=
