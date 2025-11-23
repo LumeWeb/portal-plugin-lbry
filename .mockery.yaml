@@ -1,0 +1,9 @@
+template: testify
+template-data:
+  unroll-variadic: true
+filename: "{{.InterfaceName}}.go"
+pkgname: "mocks"
+dir: "{{.InterfaceDir}}/mocks"
+all: true
+packages:
+  go.lumeweb.com/portal-plugin-lbry/core:

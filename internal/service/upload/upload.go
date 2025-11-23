@@ -15,6 +15,7 @@ import (
 	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
 	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/portal/db/models"
+	"go.lumeweb.com/queryutil"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -189,6 +190,24 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 		return nil, fmt.Errorf("failed to find stream %s: %w", sdHash, err)
 	}
 
+	// Check if pin already exists (idempotence check)
+	var existingPin db.StreamPin
+	err = s.db.WithContext(ctx).
+		Where("user_id = ? AND stream_id = ?", userId, _stream.ID).
+		First(&existingPin).Error
+
+	if err == nil {
+		// Pin already exists, return existing pin (idempotent operation)
+		s.logger.Debug("Stream pin already exists, returning existing pin",
+			zap.Uint("userID", userId),
+			zap.Uint("streamID", _stream.ID),
+			zap.String("sdHash", sdHash))
+		return &existingPin, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		// Some other error occurred
+		return nil, fmt.Errorf("failed to check existing stream pin: %w", err)
+	}
+
 	// Create a new StreamPin record
 	streamPin := &db.StreamPin{
 		UserID:   uint64(userId),
@@ -200,5 +219,94 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 		return nil, fmt.Errorf("failed to create stream pin: %w", err)
 	}
 
+	s.logger.Debug("Created new stream pin",
+		zap.Uint("userID", userId),
+		zap.Uint("streamID", _stream.ID),
+		zap.String("sdHash", sdHash))
+
 	return streamPin, nil
+}
+
+// ListStreams returns a paginated list of streams for a user
+func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Stream, int64, error) {
+	var streams []*db.Stream
+	var total int64
+
+	// Build the base query with user filter using GORM OOP
+	// Join with StreamPin to filter streams that belong to the user
+	query := s.db.WithContext(ctx).
+		Model(&db.Stream{}).
+		Joins("INNER JOIN lbry_stream_pins ON lbry_streams.id = lbry_stream_pins.stream_id").
+		Where("lbry_stream_pins.user_id = ?", userID).
+		Preload("StreamPin", "lbry_stream_pins.user_id = ?", userID)
+
+	// Apply filters using queryutil helper
+	query = queryutil.ApplyFilters(query, filters, nil)
+
+	// Count total records
+	countQuery := query
+	if err := countQuery.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to count streams: %w", err)
+	}
+
+	// Apply sorting using queryutil helper
+	query = queryutil.ApplySort(query, sorts)
+
+	// Apply pagination using queryutil helper
+	query = queryutil.ApplyPagination(query, pagination)
+
+	// Execute query
+	if err := query.Find(&streams).Error; err != nil {
+		return nil, 0, fmt.Errorf("failed to fetch streams: %w", err)
+	}
+
+	return streams, total, nil
+}
+
+// DeleteStream removes only the user's stream pin by SD hash
+func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sdHash string) error {
+	if userID == 0 {
+		return fmt.Errorf("stream not found")
+	}
+
+	// Find the stream by SD hash
+	var _stream db.Stream
+	err := s.db.WithContext(ctx).Where("sd_hash = ?", sdHash).First(&_stream).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("stream not found or access denied")
+		}
+		return fmt.Errorf("failed to find stream: %w", err)
+	}
+
+	// Check if the stream pin exists and belongs to the user
+	streamPinQuery := db.StreamPin{
+		UserID:   uint64(userID),
+		StreamID: uint64(_stream.ID),
+	}
+	var streamPin db.StreamPin
+	err = s.db.WithContext(ctx).
+		Where(&streamPinQuery).
+		First(&streamPin).Error
+
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("stream not found or access denied")
+		}
+		return fmt.Errorf("failed to check stream ownership: %w", err)
+	}
+
+	// Delete only the stream pin record
+	if err := s.db.WithContext(ctx).
+		Where(&streamPinQuery).
+		Delete(&db.StreamPin{}).Error; err != nil {
+		return fmt.Errorf("failed to delete stream pin: %w", err)
+	}
+
+	s.logger.Debug("Deleted stream pin",
+		zap.Uint("userID", userID),
+		zap.Uint("streamID", _stream.ID),
+		zap.String("sdHash", sdHash))
+
+	return nil
 }

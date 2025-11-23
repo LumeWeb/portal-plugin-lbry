@@ -16,6 +16,7 @@ require (
 	go.lumeweb.com/portal v0.4.2-0.20251118002214-4b70e6215a0b
 	go.lumeweb.com/portal-middleware v0.3.3
 	go.lumeweb.com/portal-router v0.6.8
+	go.lumeweb.com/queryutil v0.3.15
 	go.uber.org/zap v1.27.0
 	gorm.io/gorm v1.31.1
 )
@@ -176,7 +177,6 @@ require (
 	go.lumeweb.com/event/v2 v2.1.0 // indirect
 	go.lumeweb.com/gswagger v0.20.10 // indirect
 	go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639 // indirect
-	go.lumeweb.com/queryutil v0.3.14 // indirect
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
 	go.sia.tech/core v0.18.1 // indirect
 	go.sia.tech/coreutils v0.18.7 // indirect
