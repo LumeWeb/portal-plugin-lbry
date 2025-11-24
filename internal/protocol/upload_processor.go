@@ -110,7 +110,7 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 	// Process stream result using shared utility
 	// Note: userID is converted from uint64 to uint - this is safe as userID represents a DB PK
 	// and conversion will not truncate valid values in this system
-	err = ProcessStreamResult(p.ctx, p.ctx, streamResult, streamResult.SDBlobHash, uint(userID))
+	err = ProcessStreamResult(ctx, p.ctx, streamResult, streamResult.SDBlobHash, uint(userID))
 	if err != nil {
 		return nil, err
 	}
