@@ -5,11 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"testing"
 
 	"github.com/knadh/koanf/v2"
 	"go.lumeweb.com/liblbry"
+	"go.lumeweb.com/liblbry/blob/transfer"
+	"go.lumeweb.com/liblbry/blob/transfer/peer_transfer"
+	"go.lumeweb.com/liblbry/protocol"
 	"go.lumeweb.com/liblbry/server"
 	"go.lumeweb.com/liblbry/stream"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
@@ -58,6 +62,7 @@ func (p Protocol) GetProtocolPinModel() data_models.PinDataModel {
 
 func (p Protocol) Workflows() []core.WorkflowDefinition {
 	return []core.WorkflowDefinition{
+		p.newPinWorkflow(),
 		p.newUploadWorkflow(),
 		p.newTUSUploadWorkflow(),
 	}
@@ -65,11 +70,12 @@ func (p Protocol) Workflows() []core.WorkflowDefinition {
 
 func (p Protocol) Operations() []core.Operation {
 	return []core.Operation{
+		NewRetrieveOperation(p.ctx),
 		NewPostUploadOperation(p.ctx),
 		service.NewTUSOperationHandler(p.ctx, p, func(ctx context.Context, helper core.OperationHelper, request *models.Request, tsReq *models.TUSRequest) error {
-			// Validate user ID before processing
-			if request.UserID == nil || *request.UserID == 0 {
-				return fmt.Errorf("user ID is required")
+			// Validate request using shared utility
+			if err := ValidateRequest(request); err != nil {
+				return err
 			}
 			userID := *request.UserID
 
@@ -79,11 +85,17 @@ func (p Protocol) Operations() []core.Operation {
 			// Create upload processor
 			processor := NewUploadProcessor(helper.Context())
 
+			// Cast to storage protocol with type safety
+			storageProtocol, err := CastToStorageProtocol(helper.Protocol())
+			if err != nil {
+				return err
+			}
+
 			// Create TUS upload source
-			source := NewTUSUploadSource(tusHandler, tsReq.TUSUploadID, helper.Protocol().(core.StorageProtocol))
+			source := NewTUSUploadSource(tusHandler, tsReq.TUSUploadID, storageProtocol)
 
 			// Initialize the source to fetch metadata and size
-			err := source.Initialize(ctx)
+			err = source.Initialize(ctx)
 			if err != nil {
 				return err
 			}
@@ -174,6 +186,16 @@ func (p Protocol) newUploadWorkflow() core.WorkflowDefinition {
 		AutoTriggerFirstStep: true,
 		Steps: []core.OperationStep{
 			p.newRetryStep(core.PostUploadOperationName(p.Name())),
+		},
+	}
+}
+
+func (p Protocol) newPinWorkflow() core.WorkflowDefinition {
+	return core.WorkflowDefinition{
+		Name:                 PIN_WORKFLOW,
+		AutoTriggerFirstStep: true,
+		Steps: []core.OperationStep{
+			p.newRetryStep(core.RetrieveOperationName(p.Name())),
 		},
 	}
 }
@@ -315,8 +337,8 @@ func buildServer(ctx core.Context) (server.Server, error) {
 
 	var seedNodes = pluginConfig.BootstrapPeers
 
-	if protoCfg != nil && len(protoCfg.Peers) > 0 {
-		seedNodes = protoCfg.Peers
+	if protoCfg != nil && len(protoCfg.DHTSeedPeers) > 0 {
+		seedNodes = protoCfg.DHTSeedPeers
 	}
 
 	// Get the public IP for DHT address
@@ -342,11 +364,50 @@ func buildServer(ctx core.Context) (server.Server, error) {
 		dhtAddress = net.JoinHostPort(publicIP, fmt.Sprintf("%d", protoCfg.DHTPort))
 	}
 
+	// Build transfer options with fixed peers if configured
+	// Use configured values or defaults
+	dhtRetryAttempts := 0
+	maxPeers := math.MaxInt
+
+	if protoCfg != nil {
+		if protoCfg.TransferDHTRetryAttempts > 0 {
+			dhtRetryAttempts = protoCfg.TransferDHTRetryAttempts
+		}
+		if protoCfg.TransferMaxPeers != -1 {
+			maxPeers = protoCfg.TransferMaxPeers
+		}
+	}
+
+	transferOptions := []transfer.TransferOption{
+		peer_transfer.WithPeerTransferDHTRetryAttemptsOption(dhtRetryAttempts),
+		peer_transfer.WithPeerTransferMaxPeersOption(maxPeers),
+	}
+
+	// Add fixed peers to transfer options if configured
+	if protoCfg != nil && len(protoCfg.FixedPeers) > 0 {
+		ctx.Logger().Info("Adding fixed peers to transfer configuration",
+			zap.Strings("fixed_peers", protoCfg.FixedPeers))
+		transferOptions = append(transferOptions, peer_transfer.WithPeerTransferFixedPeersOption(protoCfg.FixedPeers))
+	}
+
+	// Build DHT options
+	dhtOptions := []protocol.DHTOption{
+		protocol.WithDHTSeedNodes(seedNodes),
+	}
+
+	// Add full DHT network scan if enabled in config
+	if protoCfg != nil && protoCfg.FullDHT {
+		ctx.Logger().Info("Full DHT network scan enabled - this may impact startup performance")
+		dhtOptions = append(dhtOptions, protocol.WithDHTNetworkScan(true))
+	}
+
 	builder := server.NewServerBuilder().
 		WithStorage(store).
 		WithDHT().
 		WithDHTAddress(dhtAddress).
-		WithDHTSeedNodes(seedNodes...).
+		WithDHTOptions(dhtOptions...).
+		WithDefaultAcquirer().
+		WithTransferOptions(transferOptions...).
 		WithLogger(ctx.Logger().Logger)
 
 	if protoCfg != nil {

@@ -7,8 +7,6 @@ import (
 
 	"go.lumeweb.com/liblbry/server"
 	"go.lumeweb.com/liblbry/stream"
-	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
-	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal/core"
 	"go.uber.org/zap"
 )
@@ -39,28 +37,19 @@ func NewUploadProcessor(ctx core.Context) *UploadProcessor {
 func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source UploadSource, userID uint64) (*stream.StreamResult, error) {
 	defer source.Close()
 
-	// Get protocol from context
-	proto := core.GetProtocol(internal.ProtocolName)
-	storageProto, ok := proto.(core.StorageProtocol)
-	if !ok {
-		return nil, fmt.Errorf("protocol does not implement StorageProtocol")
+	// Get protocol and node using shared utility
+	protocol, node, err := GetProtocolWithValidation()
+	if err != nil {
+		return nil, err
 	}
 
-	// Safely assert proto to *Protocol
-	pProto, ok := proto.(*Protocol)
-	if !ok {
-		return nil, fmt.Errorf("protocol is not of type *Protocol")
-	}
-
-	// Safely assert node to server.BlobManager
-	node := pProto.Node()
 	blobManager, ok := node.(server.BlobManager)
 	if !ok {
 		return nil, fmt.Errorf("failed to cast node to server.BlobManager")
 	}
 
 	// Get upload reader
-	reader, err := source.GetReader(ctx, storageProto)
+	reader, err := source.GetReader(ctx, protocol)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get upload reader: %w", err)
 	}
@@ -118,31 +107,12 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 		return nil, fmt.Errorf("failed to add SDBlob to blob manager: %w", err)
 	}
 
-	// Process upload using upload service
-	uploadSvc := core.GetService[pluginCore.UploadService](p.ctx, pluginCore.UPLOAD_SERVICE)
-	if uploadSvc == nil {
-		p.logger.Error("Upload service not available")
-		return nil, fmt.Errorf("upload service not available")
-	}
-
-	// Process all CIDs to create upload and core pin records
+	// Process stream result using shared utility
 	// Note: userID is converted from uint64 to uint - this is safe as userID represents a DB PK
-	// and the conversion will not truncate valid values in this system
-	err = uploadSvc.ProcessUpload(p.ctx, streamResult, uint(userID))
+	// and conversion will not truncate valid values in this system
+	err = ProcessStreamResult(ctx, p.ctx, streamResult, streamResult.SDBlobHash, uint(userID))
 	if err != nil {
-		return nil, fmt.Errorf("failed to process upload: %w", err)
-	}
-
-	// Convert SD blob hash to CID
-	sdCid, err := internal.LBRYHashToCID(streamResult.SDBlobHash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert SD blob hash to CID: %w", err)
-	}
-
-	// Create stream pin record
-	_, err = uploadSvc.CreateStreamPin(p.ctx, uint(userID), sdCid)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create root pin: %w", err)
+		return nil, err
 	}
 
 	return streamResult, nil

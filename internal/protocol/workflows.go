@@ -1,10 +1,13 @@
 package protocol
 
-import "go.lumeweb.com/portal-plugin-lbry/internal/api/dto"
+import (
+	"go.lumeweb.com/portal-plugin-lbry/internal/api/dto"
+)
 
 // LBRY workflow constants
 const UPLOAD_WORKFLOW = "lbry.upload"
 const TUS_UPLOAD_WORKFLOW = "lbry.tus.upload"
+const PIN_WORKFLOW = "lbry.pin"
 
 // PostUploadWorkflowData contains data for post-upload workflow processing
 type PostUploadWorkflowData struct {

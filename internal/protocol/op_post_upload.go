@@ -15,16 +15,7 @@ type PostUploadOperationHandler struct {
 }
 
 func (h *PostUploadOperationHandler) ValidateRequest(_ context.Context, req *models.Request) error {
-	if req.Hash == nil {
-		return fmt.Errorf("upload hash is required")
-	}
-	if req.UserID == nil {
-		return fmt.Errorf("user ID is required")
-	}
-	if *req.UserID == 0 {
-		return fmt.Errorf("user ID cannot be zero")
-	}
-	return nil
+	return ValidateRequestWithHash(req)
 }
 
 func (h *PostUploadOperationHandler) Execute(ctx context.Context, req *models.Request) error {
@@ -34,14 +25,20 @@ func (h *PostUploadOperationHandler) Execute(ctx context.Context, req *models.Re
 		return err
 	}
 
-	// Get storage service
-	storageSvc := core.GetService[core.StorageService](h.Context(), core.STORAGE_SERVICE)
-	if storageSvc == nil {
-		return fmt.Errorf("storage service not available")
+	// Get storage service using shared utility
+	storageSvc, err := GetStorageService(h.Context())
+	if err != nil {
+		return err
 	}
 
 	// Create upload processor
 	processor := NewUploadProcessor(h.Context())
+
+	// Cast to storage protocol with type safety
+	storageProtocol, err := CastToStorageProtocol(h.Protocol())
+	if err != nil {
+		return err
+	}
 
 	// Create post upload source
 	source := NewPostUploadSource(
@@ -49,7 +46,7 @@ func (h *PostUploadOperationHandler) Execute(ctx context.Context, req *models.Re
 		workflow.Size,
 		workflow.Meta,
 		storageSvc,
-		h.Protocol().(core.StorageProtocol),
+		storageProtocol,
 	)
 
 	// Process the upload using shared processor
@@ -76,13 +73,19 @@ func (h *PostUploadOperationHandler) Cleanup(ctx context.Context, req *models.Re
 		return fmt.Errorf("failed to load workflow data: %w", err)
 	}
 
-	// Delete temporary upload
-	storageSvc := core.GetService[core.StorageService](h.Context(), core.STORAGE_SERVICE)
-	if storageSvc == nil {
-		return fmt.Errorf("storage service not available")
+	// Delete temporary upload using shared utility
+	storageSvc, err := GetStorageService(h.Context())
+	if err != nil {
+		return err
 	}
 
-	err = storageSvc.S3DeleteTemporaryUpload(ctx, h.Protocol().(core.StorageProtocol), workflow.UploadID)
+	// Cast to storage protocol with type safety
+	storageProtocol, err := CastToStorageProtocol(h.Protocol())
+	if err != nil {
+		return err
+	}
+
+	err = storageSvc.S3DeleteTemporaryUpload(ctx, storageProtocol, workflow.UploadID)
 	if err != nil {
 		return fmt.Errorf("failed to delete temporary upload: %w", err)
 	}

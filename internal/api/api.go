@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,8 +56,11 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 			api.workflowService = core.GetService[core.WorkflowService](ctx, core.WORKFLOW_SERVICE)
 			api.uploadService = core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
 
+			sproto, err := protocol.GetStorageProtocol()
+			if err != nil {
+				return fmt.Errorf("failed to get storage protocol: %w", err)
+			}
 			proto := core.GetProtocol(internal.ProtocolName)
-			sproto := proto.(core.StorageProtocol)
 			event.OnBootStartupFuncsCompleted(ctx, func(ctx core.Context) error {
 				var _tus core.TusHandler
 				var err error
@@ -217,11 +219,66 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 	}
 
 	// Generate and return response
-	// Return a successful response containing the upload hash (CID)
+	// Return a successful response containing the upload hash (LBRY hash)
 	// The client can use this hash to reference and retrieve the uploaded content
+
+	lbryHash, err := internal.CIDToLBRYHash(uploadCID)
+	if err != nil {
+		// If conversion fails, return the error
+		return fmt.Errorf("failed to convert CID to LBRY hash: %w", err)
+	}
+
 	return httputil.EncodeResponse(ctx, &dto.PostStreamUploadResponse{}, &dto.PostStreamUploadResponse{
-		UploadHash: uploadCID.String(),
+		UploadHash: lbryHash,
 	})
+}
+
+// handleStreamPin handles stream pin requests
+// This function processes pin requests for LBRY streams, handling authentication,
+// request validation, and pin management.
+func (a *API) handleStreamPin(c echo.Context) error {
+	// Extract request context and authenticate user
+	ctx := httputil.Context(c)
+
+	// Extract user ID from the request context for authentication
+	user, err := mcontext.GetUserID(ctx.Context)
+	if err != nil {
+		// If user authentication fails, return an account error
+		apiErr := core.NewAccountError(core.ErrKeyLoginFailed, nil)
+		_ = ctx.Error(apiErr, apiErr.HttpStatus())
+		return nil
+	}
+
+	// Parse and validate request body using httputil
+	var pinRequest dto.StreamPinRequest
+	_, ok := httputil.DecodeAndValidateRequest(ctx, &pinRequest)
+	if !ok {
+		return nil
+	}
+
+	multihash, err := internal.LBRYHashToStorageHash(pinRequest.SDHash)
+	if err != nil {
+		_ = ctx.Error(NewError(ErrKeyInvalidSDHash, err), http.StatusBadRequest)
+		return nil
+	}
+
+	// Start pin workflow for background processing
+	_, err = a.workflowService.StartWorkflow(ctx.Request().Context(), protocol.PIN_WORKFLOW,
+		// Associate the workflow with the authenticated user
+		core.WithWorkflowUserID(user),
+		// Record the source IP
+		core.WithWorkflowSourceIP(c.RealIP()),
+		// Specify the protocol
+		core.WithWorkflowProtocol(internal.ProtocolName),
+		// Specify the SD hash
+		core.WithWorkflowStorageHash(multihash),
+	)
+	if err != nil {
+		// If workflow initiation fails, return the error
+		return err
+	}
+
+	return ctx.NoContent(http.StatusCreated)
 }
 
 func (a *API) Configure(r router.Router, accessService core.AccessService) error {
@@ -238,7 +295,19 @@ func (a *API) Configure(r router.Router, accessService core.AccessService) error
 				router.WithSummary("Upload a stream"),
 				router.WithDescription("Upload a stream to the LBRY network. This endpoint requires authentication and supports file uploads up to the configured limit."),
 				router.WithFileUpload("File to upload", true),
-				router.WithSuccessResponse(http.StatusOK, "File uploaded successfully", router.WithJSONContent(&dto.PostStreamUploadResponse{})),
+				router.WithSuccessResponse(http.StatusCreated, "File uploaded successfully", router.WithJSONContent(&dto.PostStreamUploadResponse{})),
+			),
+		),
+		router.NewRoute(
+			http.MethodPost,
+			"/streams/pin",
+			a.handleStreamPin,
+			router.WithAccess(core.ACCESS_USER_ROLE),
+			router.WithSwagger(
+				router.WithSummary("Pin a stream"),
+				router.WithDescription("Pin a stream to keep it available on the LBRY network. This endpoint requires authentication."),
+				router.WithRequestBody(&dto.StreamPinRequest{}, "Pin request", true),
+				router.WithSuccessResponse(http.StatusCreated, "Stream pin request accepted"),
 			),
 		),
 	)
@@ -260,19 +329,6 @@ func (a *API) Configure(r router.Router, accessService core.AccessService) error
 	}
 
 	return nil
-}
-
-func createStreamReader(data io.Reader) (io.Reader, error) {
-	// Read the first bytes into a buffer for validation
-	buf := make([]byte, 1024) // Adjust buffer size as needed for LBRY streams
-	n, err := io.ReadFull(data, buf)
-	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-		return nil, err
-	}
-
-	// Create a bytes.Reader that supports ReaderAt
-	reader := bytes.NewReader(buf[:n])
-	return reader, nil
 }
 
 func closeUpload(upload io.ReadCloser, logger *core.Logger) {

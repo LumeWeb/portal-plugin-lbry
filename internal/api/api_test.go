@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.lumeweb.com/liblbry/blob"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/api/dto"
@@ -273,6 +274,7 @@ func TestAPI_handleStreamUpload_Success(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotEmpty(t, response.UploadHash)
 		assert.True(t, len(response.UploadHash) > 0, "UploadHash should not be empty")
+		assert.Equal(t, blob.BlobHashHexLength, len(response.UploadHash), "UploadHash should be exactly BlobHashHexLength characters long")
 	}, getTestOptions(), coreTesting.WithMockS3())
 }
 

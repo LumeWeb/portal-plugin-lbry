@@ -37,6 +37,7 @@ func GetPluginTestOptions() []coreTesting.TestContextBuilderOption {
 		coreTesting.WithConfig("plugin.lbry.protocol.peer_port", uint(freePeerPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.dht_port", uint(freeDhtPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeDhtPort)),
+		coreTesting.WithConfig("plugin.lbry.protocol.fixed_peers", []string{"s1.lbry.network:4444"}),
 		coreTesting.WithProtocolConfig(internal.ProtocolName, pluginConfig.ProtocolConfig{
 			PeerPort:      uint(freePeerPort),
 			DHTPort:       uint(freeDhtPort),

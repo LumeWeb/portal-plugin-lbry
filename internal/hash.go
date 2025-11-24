@@ -37,3 +37,18 @@ func LBRYHashToStorageHash(hash string) (core.StorageHash, error) {
 func LBRYHashToCID(hash string) (cid.Cid, error) {
 	return lbryHashToCid(hash)
 }
+
+// cidToLbryHash is a helper function that converts a CID to an LBRY hash
+func cidToLbryHash(c cid.Cid) (string, error) {
+	lbryHash, err := stream.FromMultihash(c.String())
+	if err != nil {
+		return "", fmt.Errorf("failed to convert CID %q to LBRY hash: %w", c.String(), err)
+	}
+
+	return lbryHash, nil
+}
+
+// CIDToLBRYHash converts a CID to an LBRY hash
+func CIDToLBRYHash(c cid.Cid) (string, error) {
+	return cidToLbryHash(c)
+}
