@@ -3,6 +3,7 @@ package dto
 import (
 	z "github.com/Oudwins/zog"
 	"go.lumeweb.com/httputil"
+	"go.lumeweb.com/liblbry/blob"
 )
 
 var _ httputil.DTOValidator = (*StreamPinRequest)(nil)
@@ -17,9 +18,7 @@ type StreamPinRequest struct {
 // Schema returns a Zog schema for validating StreamPinRequest
 func (p *StreamPinRequest) Schema() *z.StructSchema {
 	return z.Struct(z.Shape{
-		"SDHash": z.String().
-			Required().
-			Min(1),
+		"SDHash": z.String().Required().Len(blob.BlobHashHexLength),
 	})
 }
 

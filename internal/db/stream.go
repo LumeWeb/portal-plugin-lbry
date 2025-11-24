@@ -12,6 +12,7 @@ type Stream struct {
 	StreamType        string
 	SuggestedFileName string
 	KeyData           []byte
+	StreamPin         []StreamPin `gorm:"foreignKey:StreamID"`
 }
 
 func (Stream) TableName() string {

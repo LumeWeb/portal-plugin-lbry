@@ -20,6 +20,9 @@ var (
 	ErrKeyStreamProcessingFailed   core.ErrorType = "stream_processing_failed"
 	ErrKeyEmptyFile                core.ErrorType = "empty_file"
 	ErrKeyInvalidSDHash            core.ErrorType = "invalid_sd_hash"
+	ErrKeyStreamNotFound           core.ErrorType = "stream_not_found"
+	ErrKeyStreamDeleteFailed       core.ErrorType = "stream_delete_failed"
+	ErrKeyStreamListFailed         core.ErrorType = "stream_list_failed"
 )
 
 // ErrorDetails represents detailed error information
@@ -80,6 +83,9 @@ func init() {
 		ErrKeyStreamProcessingFailed:   {Key: ErrKeyStreamProcessingFailed, Message: "Stream processing failed"},
 		ErrKeyEmptyFile:                {Key: ErrKeyEmptyFile, Message: "Uploaded file is empty"},
 		ErrKeyInvalidSDHash:            {Key: ErrKeyInvalidSDHash, Message: "Invalid SD hash format"},
+		ErrKeyStreamNotFound:           {Key: ErrKeyStreamNotFound, Message: "Stream not found or access denied"},
+		ErrKeyStreamDeleteFailed:       {Key: ErrKeyStreamDeleteFailed, Message: "Failed to delete stream"},
+		ErrKeyStreamListFailed:         {Key: ErrKeyStreamListFailed, Message: "Failed to list streams"},
 	})
 
 	// Register HTTP status codes using map-based approach
@@ -91,5 +97,8 @@ func init() {
 		ErrKeyStreamProcessingFailed:   http.StatusInternalServerError,
 		ErrKeyEmptyFile:                http.StatusBadRequest,
 		ErrKeyInvalidSDHash:            http.StatusBadRequest,
+		ErrKeyStreamNotFound:           http.StatusNotFound,
+		ErrKeyStreamDeleteFailed:       http.StatusInternalServerError,
+		ErrKeyStreamListFailed:         http.StatusInternalServerError,
 	})
 }

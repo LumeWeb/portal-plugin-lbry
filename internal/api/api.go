@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,13 +18,17 @@ import (
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/api/dto"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
+	"go.lumeweb.com/portal-plugin-lbry/internal/db"
 	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
 	"go.lumeweb.com/portal-router"
 	"go.lumeweb.com/portal/config"
 	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/portal/event"
 	"go.lumeweb.com/portal/service"
+	"go.lumeweb.com/queryutil"
+	queryutilhttp "go.lumeweb.com/queryutil/http"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 var _ core.API = (*API)(nil)
@@ -281,8 +286,108 @@ func (a *API) handleStreamPin(c echo.Context) error {
 	return ctx.NoContent(http.StatusCreated)
 }
 
+// handleStreamList handles stream list requests
+// This function processes list requests for LBRY streams using queryutilhttp.ProcessListRequest
+// for standardized HTTP handling with authentication, query parsing, and pagination.
+func (a *API) handleStreamList(c echo.Context) error {
+	// Extract request context and authenticate user
+	ctx := httputil.Context(c)
+
+	// Extract user ID from the request context for authentication
+	user, err := mcontext.GetUserID(ctx.Context)
+	if err != nil {
+		// If user authentication fails, return an account error
+		apiErr := core.NewAccountError(core.ErrKeyLoginFailed, nil)
+		_ = ctx.Error(apiErr, apiErr.HttpStatus())
+		return nil
+	}
+
+	// Get the upload service
+	uploadSvc := core.GetService[pluginCore.UploadService](a.ctx, pluginCore.UPLOAD_SERVICE)
+	if uploadSvc == nil {
+		_ = ctx.Error(NewError(ErrKeyStreamListFailed, fmt.Errorf("upload service not available")), http.StatusInternalServerError)
+		return nil
+	}
+
+	// Use queryutilhttp.ProcessListRequest for standardized HTTP handling
+	return queryutilhttp.ProcessListRequest(
+		c.Response(),
+		c.Request(),
+		"streams",
+		// Create service function that includes user filtering
+		func(filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Stream, int64, error) {
+			return uploadSvc.ListStreams(ctx.Request().Context(), uint(user), filters, sorts, pagination)
+		},
+		// Convert domain entities to DTOs
+		func(stream *db.Stream) *dto.StreamResponse {
+			return &dto.StreamResponse{
+				ID:                uint64(stream.ID),
+				StreamHash:        stream.StreamHash,
+				SDHash:            stream.SDHash,
+				StreamName:        stream.StreamName,
+				StreamType:        stream.StreamType,
+				SuggestedFileName: stream.SuggestedFileName,
+				CreatedAt:         stream.CreatedAt,
+				UpdatedAt:         stream.UpdatedAt,
+			}
+		},
+		// Configure search and sort options
+		queryutilhttp.WithSearchConfig(&queryutil.GlobalSearchConfig{
+			SearchableColumns: []string{"stream_name", "sd_hash"},
+		}),
+	)
+}
+
+// handleStreamDelete handles stream deletion requests
+// This function processes delete requests for LBRY streams, handling authentication,
+// request validation, and stream deletion.
+func (a *API) handleStreamDelete(c echo.Context) error {
+	// Extract request context and authenticate user
+	ctx := httputil.Context(c)
+
+	// Extract user ID from the request context for authentication
+	user, err := mcontext.GetUserID(ctx.Context)
+	if err != nil {
+		// If user authentication fails, return an account error
+		apiErr := core.NewAccountError(core.ErrKeyLoginFailed, nil)
+		_ = ctx.Error(apiErr, apiErr.HttpStatus())
+		return nil
+	}
+
+	// Parse and validate request body using httputil
+	var deleteRequest dto.StreamDeleteRequest
+	_, ok := httputil.DecodeAndValidateRequest(ctx, &deleteRequest)
+	if !ok {
+		return nil
+	}
+
+	// Get the upload service
+	uploadSvc := core.GetService[pluginCore.UploadService](a.ctx, pluginCore.UPLOAD_SERVICE)
+	if uploadSvc == nil {
+		_ = ctx.Error(NewError(ErrKeyStreamDeleteFailed, fmt.Errorf("upload service not available")), http.StatusInternalServerError)
+		return nil
+	}
+
+	// Delete the stream
+	err = uploadSvc.DeleteStream(ctx.Request().Context(), user, deleteRequest.SDHash)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = ctx.Error(NewError(ErrKeyStreamNotFound, err), http.StatusNotFound)
+		} else {
+			_ = ctx.Error(NewError(ErrKeyStreamDeleteFailed, err), http.StatusInternalServerError)
+		}
+		return nil
+	}
+
+	// Return success response
+	return ctx.NoContent(http.StatusNoContent)
+}
+
 func (a *API) Configure(r router.Router, accessService core.AccessService) error {
 	authMw := middleware.AuthMiddleware(a.ctx, middleware.WithAuthPurpose(jwt.PurposeLogin, jwt.PurposeAPI))
+
+	// Create reusable schema for StreamResponse
+	streamSchema := queryutil.NewSchemaProvider().ForType(&dto.StreamResponse{})
 
 	// Define routes using the correct pattern
 	routes := router.DefineRoutes(
@@ -308,6 +413,30 @@ func (a *API) Configure(r router.Router, accessService core.AccessService) error
 				router.WithDescription("Pin a stream to keep it available on the LBRY network. This endpoint requires authentication."),
 				router.WithRequestBody(&dto.StreamPinRequest{}, "Pin request", true),
 				router.WithSuccessResponse(http.StatusCreated, "Stream pin request accepted"),
+			),
+		),
+		router.NewRoute(
+			http.MethodGet,
+			"/streams",
+			a.handleStreamList,
+			router.WithAccess(core.ACCESS_USER_ROLE),
+			router.WithSwagger(
+				router.WithSummary("List streams"),
+				router.WithDescription("List all streams for the authenticated user with pagination, filtering, and sorting support."),
+				router.WithSchema(streamSchema),
+				router.WithFilterParamsFromSchema(streamSchema),
+				router.WithSuccessResponse(http.StatusOK, "Streams retrieved successfully", router.WithJSONContent(&queryutil.Response[[]*dto.StreamResponse]{})),
+			),
+		),
+		router.NewRoute(
+			http.MethodDelete,
+			"/streams/:sd_hash",
+			a.handleStreamDelete,
+			router.WithAccess(core.ACCESS_USER_ROLE),
+			router.WithSwagger(
+				router.WithSummary("Unpin a stream"),
+				router.WithDescription("Unpin this stream for the authenticated user. The stream itself and other users' pins remain. Only streams that the user has pinned can be unpinned."),
+				router.WithSuccessResponse(http.StatusNoContent, "Stream unpinned successfully"),
 			),
 		),
 	)
