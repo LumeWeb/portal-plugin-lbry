@@ -47,6 +47,17 @@ CREATE TABLE IF NOT EXISTS lbry_stream_pins (
     FOREIGN KEY (stream_id) REFERENCES lbry_streams(id) ON DELETE CASCADE,
     UNIQUE KEY unique_user_stream_pin (user_id, stream_id)
 );
+
+CREATE TABLE IF NOT EXISTS lbry_devices (
+    id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    ip_address VARCHAR(45) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 -- +goose StatementEnd
 
 -- +goose Down
@@ -55,4 +66,5 @@ DROP TABLE IF EXISTS lbry_stream_pins;
 DROP TABLE IF EXISTS lbry_stream_blobs;
 DROP TABLE IF EXISTS lbry_blobs;
 DROP TABLE IF EXISTS lbry_streams;
+DROP TABLE IF EXISTS lbry_devices;
 -- +goose StatementEnd
