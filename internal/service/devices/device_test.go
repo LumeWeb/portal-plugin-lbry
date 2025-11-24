@@ -481,66 +481,72 @@ func TestDeviceServiceDefault_ListDevices(t *testing.T) {
 }
 
 func TestDeviceServiceDefault_DeleteDevice(t *testing.T) {
-	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
-		// Arrange
-		deviceSvc := core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
-		require.NotNil(tb, deviceSvc)
+	t.Run("successful device deletion", func(t *testing.T) {
+		coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+			// Arrange
+			deviceSvc := core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
+			require.NotNil(tb, deviceSvc)
 
-		testUserID := uint(1)
+			testUserID := uint(1)
 
-		// Create a device to delete
-		createdDevice, err := deviceSvc.CreateDevice(context.Background(), testUserID, testDeviceName1, testIPv4)
-		require.NoError(tb, err)
+			// Create a device to delete
+			createdDevice, err := deviceSvc.CreateDevice(context.Background(), testUserID, testDeviceName1, testIPv4)
+			require.NoError(tb, err)
 
-		// Create another device for different user
-		otherUserDevice, err := deviceSvc.CreateDevice(context.Background(), 2, testDeviceName2, testIPv6)
-		require.NoError(tb, err)
+			// Act
+			err = deviceSvc.DeleteDevice(context.Background(), testUserID, createdDevice.ID)
 
-		tests := []struct {
-			name        string
-			userID      uint
-			deviceID    uint
-			expectError bool
-		}{
-			{
-				name:        "successful device deletion",
-				userID:      testUserID,
-				deviceID:    createdDevice.ID,
-				expectError: false,
-			},
-			{
-				name:        "idempotent deletion of non-existent device",
-				userID:      testUserID,
-				deviceID:    999,
-				expectError: false,
-			},
-			{
-				name:        "cannot delete other user's device",
-				userID:      testUserID,
-				deviceID:    otherUserDevice.ID,
-				expectError: true,
-			},
-		}
+			// Assert
+			assert.NoError(tb, err)
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				// Act
-				err := deviceSvc.DeleteDevice(context.Background(), tt.userID, tt.deviceID)
+			// Verify the device is actually deleted
+			_, err = deviceSvc.GetDevice(context.Background(), testUserID, createdDevice.ID)
+			assert.Error(tb, err)
+			assert.Contains(tb, err.Error(), "device not found")
+		}, getTestOptions())
+	})
 
-				// Assert
-				if tt.expectError {
-					assert.Error(t, err)
-				} else {
-					assert.NoError(t, err)
-				}
-			})
-		}
+	t.Run("idempotent deletion of non-existent device", func(t *testing.T) {
+		coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+			// Arrange
+			deviceSvc := core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
+			require.NotNil(tb, deviceSvc)
 
-		// Verify the created device is actually deleted
-		_, err = deviceSvc.GetDevice(context.Background(), testUserID, createdDevice.ID)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "device not found")
-	}, getTestOptions())
+			testUserID := uint(1)
+
+			// Act - try to delete a non-existent device
+			err := deviceSvc.DeleteDevice(context.Background(), testUserID, 999)
+
+			// Assert - should not error (idempotent operation)
+			assert.NoError(tb, err)
+		}, getTestOptions())
+	})
+
+	t.Run("cannot delete other user's device", func(t *testing.T) {
+		coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+			// Arrange
+			deviceSvc := core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
+			require.NotNil(tb, deviceSvc)
+
+			testUserID := uint(1)
+			otherUserID := uint(2)
+
+			// Create a device for another user
+			otherUserDevice, err := deviceSvc.CreateDevice(context.Background(), otherUserID, testDeviceName2, testIPv6)
+			require.NoError(tb, err)
+
+			// Act - try to delete other user's device
+			err = deviceSvc.DeleteDevice(context.Background(), testUserID, otherUserDevice.ID)
+
+			// Assert - should error
+			assert.Error(tb, err)
+
+			// Verify the device still exists
+			device, err := deviceSvc.GetDevice(context.Background(), otherUserID, otherUserDevice.ID)
+			assert.NoError(tb, err)
+			assert.Equal(tb, otherUserDevice.ID, device.ID)
+		}, getTestOptions())
+	})
 }
 
 func TestDeviceService_GetDeviceByIPAddress(t *testing.T) {

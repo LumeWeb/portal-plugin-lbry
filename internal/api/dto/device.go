@@ -64,8 +64,7 @@ func (c *CreateDeviceRequest) Schema() *z.StructSchema {
 			Max(255),
 		"IPAddress": z.String().
 			Required().
-			Min(1).
-			Max(45),
+			IP(),
 	})
 }
 

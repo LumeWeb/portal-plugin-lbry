@@ -118,7 +118,7 @@ func TestDeviceAPI_CreateDevice(t *testing.T) {
 				Name:      "Invalid Device",
 				IPAddress: "invalid.ip.address",
 			},
-			expectedStatus: http.StatusBadRequest,
+			expectedStatus: http.StatusUnprocessableEntity,
 			expectError:    true,
 		},
 		{
@@ -126,7 +126,7 @@ func TestDeviceAPI_CreateDevice(t *testing.T) {
 			requestBody: dto.CreateDeviceRequest{
 				IPAddress: "192.168.1.100",
 			},
-			expectedStatus: http.StatusBadRequest,
+			expectedStatus: http.StatusUnprocessableEntity,
 			expectError:    true,
 		},
 		{
@@ -134,7 +134,7 @@ func TestDeviceAPI_CreateDevice(t *testing.T) {
 			requestBody: dto.CreateDeviceRequest{
 				Name: "Test Device",
 			},
-			expectedStatus: http.StatusBadRequest,
+			expectedStatus: http.StatusUnprocessableEntity,
 			expectError:    true,
 		},
 	}

@@ -91,6 +91,11 @@ func init() {
 		ErrKeyStreamNotFound:           {Key: ErrKeyStreamNotFound, Message: "Stream not found or access denied"},
 		ErrKeyStreamDeleteFailed:       {Key: ErrKeyStreamDeleteFailed, Message: "Failed to delete stream"},
 		ErrKeyStreamListFailed:         {Key: ErrKeyStreamListFailed, Message: "Failed to list streams"},
+		ErrKeyDeviceCreateFailed:       {Key: ErrKeyDeviceCreateFailed, Message: "Failed to create device"},
+		ErrKeyDeviceUpdateFailed:       {Key: ErrKeyDeviceUpdateFailed, Message: "Failed to update device"},
+		ErrKeyDeviceGetFailed:          {Key: ErrKeyDeviceGetFailed, Message: "Failed to get device"},
+		ErrKeyDeviceDeleteFailed:       {Key: ErrKeyDeviceDeleteFailed, Message: "Failed to delete device"},
+		ErrKeyDeviceListFailed:         {Key: ErrKeyDeviceListFailed, Message: "Failed to list devices"},
 	})
 
 	// Register HTTP status codes using map-based approach
@@ -105,5 +110,10 @@ func init() {
 		ErrKeyStreamNotFound:           http.StatusNotFound,
 		ErrKeyStreamDeleteFailed:       http.StatusInternalServerError,
 		ErrKeyStreamListFailed:         http.StatusInternalServerError,
+		ErrKeyDeviceCreateFailed:       http.StatusBadRequest,
+		ErrKeyDeviceUpdateFailed:       http.StatusBadRequest,
+		ErrKeyDeviceGetFailed:          http.StatusNotFound,
+		ErrKeyDeviceDeleteFailed:       http.StatusBadRequest,
+		ErrKeyDeviceListFailed:         http.StatusInternalServerError,
 	})
 }

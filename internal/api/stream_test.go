@@ -46,7 +46,7 @@ func TestAPI_handleStreamUpload_Success(t *testing.T) {
 		ctx.Router().ServeHTTP(rec, req)
 
 		// Verify response
-		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, http.StatusCreated, rec.Code)
 		var response dto.PostStreamUploadResponse
 		err := json.Unmarshal(rec.Body.Bytes(), &response)
 		assert.NoError(t, err)
@@ -147,7 +147,7 @@ func TestAPI_handleStreamUpload_LargeFile(t *testing.T) {
 
 		// Verify response - should succeed if within limits
 		// Note: This might fail if the upload limit is configured lower than our test content
-		if rec.Code == http.StatusOK {
+		if rec.Code == http.StatusCreated {
 			var response dto.PostStreamUploadResponse
 			err := json.Unmarshal(rec.Body.Bytes(), &response)
 			assert.NoError(t, err)
@@ -466,7 +466,7 @@ func TestAPIHandleStreamList(t *testing.T) {
 
 				// Create request using queryutil.BuildURL for dynamic URL generation
 				baseURL := "/api/streams"
-				var requestURL string
+				requestURL := baseURL
 				var err error
 
 				if tt.filters != nil || tt.sorts != nil || tt.pagination != nil {

@@ -52,12 +52,14 @@ CREATE TABLE IF NOT EXISTS lbry_devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
-    ip_address TEXT NOT NULL,
+    ip_address TEXT NOT NULL UNIQUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP DEFAULT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_lbry_devices_user_id ON lbry_devices(user_id);
 -- +goose StatementEnd
 
 -- +goose Down

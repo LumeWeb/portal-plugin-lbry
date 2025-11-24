@@ -3,13 +3,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
 	"go.lumeweb.com/httputil"
 	mcontext "go.lumeweb.com/portal-middleware/context"
-	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/api/dto"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
@@ -151,7 +149,8 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 	uploadCID, uploadID, err := a.uploadService.HandleUpload(reqCtx, upload.File)
 	if err != nil {
 		// If upload processing fails, return the error
-		return err
+		_ = ctx.Error(NewError(ErrKeyUploadFailed, err), http.StatusInternalServerError)
+		return nil
 	}
 
 	// Initiate upload workflow for post-processing
@@ -175,7 +174,8 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 	)
 	if err != nil {
 		// If workflow initiation fails, return the error
-		return err
+		_ = ctx.Error(NewError(ErrKeyStreamProcessingFailed, err), http.StatusInternalServerError)
+		return nil
 	}
 
 	// Generate and return response
@@ -185,9 +185,11 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 	lbryHash, err := internal.CIDToLBRYHash(uploadCID)
 	if err != nil {
 		// If conversion fails, return the error
-		return fmt.Errorf("failed to convert CID to LBRY hash: %w", err)
+		_ = ctx.Error(NewError(ErrKeyInvalidSDHash, err), http.StatusBadRequest)
+		return nil
 	}
 
+	ctx.Response().WriteHeader(http.StatusCreated)
 	return httputil.EncodeResponse(ctx, &dto.PostStreamUploadResponse{}, &dto.PostStreamUploadResponse{
 		UploadHash: lbryHash,
 	})
@@ -257,13 +259,6 @@ func (a *API) handleStreamList(c echo.Context) error {
 		return nil
 	}
 
-	// Get the upload service
-	uploadSvc := core.GetService[pluginCore.UploadService](a.ctx, pluginCore.UPLOAD_SERVICE)
-	if uploadSvc == nil {
-		_ = ctx.Error(NewError(ErrKeyStreamListFailed, fmt.Errorf("upload service not available")), http.StatusInternalServerError)
-		return nil
-	}
-
 	// Use queryutilhttp.ProcessListRequest for standardized HTTP handling
 	return queryutilhttp.ProcessListRequest(
 		c.Response(),
@@ -271,7 +266,7 @@ func (a *API) handleStreamList(c echo.Context) error {
 		"streams",
 		// Create service function that includes user filtering
 		func(filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Stream, int64, error) {
-			return uploadSvc.ListStreams(ctx.Request().Context(), uint(user), filters, sorts, pagination)
+			return a.uploadService.ListStreams(ctx.Request().Context(), uint(user), filters, sorts, pagination)
 		},
 		// Convert domain entities to DTOs
 		func(stream *db.Stream) *dto.StreamResponse {
@@ -316,15 +311,8 @@ func (a *API) handleStreamDelete(c echo.Context) error {
 		return nil
 	}
 
-	// Get the upload service
-	uploadSvc := core.GetService[pluginCore.UploadService](a.ctx, pluginCore.UPLOAD_SERVICE)
-	if uploadSvc == nil {
-		_ = ctx.Error(NewError(ErrKeyStreamDeleteFailed, fmt.Errorf("upload service not available")), http.StatusInternalServerError)
-		return nil
-	}
-
 	// Delete the stream
-	err = uploadSvc.DeleteStream(ctx.Request().Context(), user, deleteRequest.SDHash)
+	err = a.uploadService.DeleteStream(ctx.Request().Context(), user, deleteRequest.SDHash)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			_ = ctx.Error(NewError(ErrKeyStreamNotFound, err), http.StatusNotFound)

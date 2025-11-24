@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -99,17 +98,10 @@ func (a *API) handleDeviceCreate(c echo.Context) error {
 		return nil
 	}
 
-	// Parse and validate request body
+	// Parse and validate request body using httputil
 	var req dto.CreateDeviceRequest
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceCreateFailed, err), http.StatusBadRequest)
-		return nil
-	}
-
-	// Validate the request using ctx.Validate
-	err = ctx.Validate(&req)
-	if err != nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceCreateFailed, err), http.StatusBadRequest)
+	_, ok := httputil.DecodeAndValidateRequest(ctx, &req)
+	if !ok {
 		return nil
 	}
 
@@ -169,17 +161,10 @@ func (a *API) handleDeviceUpdate(c echo.Context) error {
 		return nil
 	}
 
-	// Parse and validate request body
+	// Parse and validate request body using httputil
 	var req dto.UpdateDeviceRequest
-	if err := json.NewDecoder(c.Request().Body).Decode(&req); err != nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceUpdateFailed, err), http.StatusBadRequest)
-		return nil
-	}
-
-	// Validate the request using ctx.Validate
-	err = ctx.Validate(&req)
-	if err != nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceUpdateFailed, err), http.StatusBadRequest)
+	_, ok := httputil.DecodeAndValidateRequest(ctx, &req)
+	if !ok {
 		return nil
 	}
 
