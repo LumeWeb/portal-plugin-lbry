@@ -919,7 +919,7 @@ func createTestStream(ctx coreTesting.TestContext, streamName, sdHash string) *d
 	}
 	err := ctx.DB().Create(stream).Error
 	if err != nil {
-		panic(err)
+		ctx.T().Fatalf("Failed to create test stream: %v", err)
 	}
 	return stream
 }
@@ -931,7 +931,7 @@ func createTestStreamPin(ctx coreTesting.TestContext, userID uint64, streamID ui
 	}
 	err := ctx.DB().Create(pin).Error
 	if err != nil {
-		panic(err)
+		ctx.T().Fatalf("Failed to create test stream pin: %v", err)
 	}
 	return pin
 }
@@ -944,7 +944,7 @@ func createTestStreamBlob(ctx coreTesting.TestContext, streamID uint64, blobID u
 	}
 	err := ctx.DB().Create(blob).Error
 	if err != nil {
-		panic(err)
+		ctx.T().Fatalf("Failed to create test stream blob: %v", err)
 	}
 	return blob
 }
@@ -1081,16 +1081,6 @@ func TestUploadServiceDefault_ListStreams(t *testing.T) {
 
 				// Act
 				streams, total, err := uploadsvc.ListStreams(context.Background(), tt.userID, tt.filters, tt.sorts, tt.pagination)
-
-				// Debug output for pagination test
-				if tt.name == "listing with pagination" {
-					fmt.Printf("DEBUG: pagination = %+v\n", tt.pagination)
-					fmt.Printf("DEBUG: GetOffset() = %d, GetLimit() = %d\n", tt.pagination.GetOffset(), tt.pagination.GetLimit())
-					fmt.Printf("DEBUG: expected %d results, got %d\n", tt.expectResults, len(streams))
-					for i, stream := range streams {
-						fmt.Printf("DEBUG: stream[%d] = {ID: %d, Name: %s}\n", i, stream.ID, stream.StreamName)
-					}
-				}
 
 				// Assert
 				if tt.expectError {

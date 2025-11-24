@@ -434,9 +434,9 @@ func (a *API) Configure(r router.Router, accessService core.AccessService) error
 			a.handleStreamDelete,
 			router.WithAccess(core.ACCESS_USER_ROLE),
 			router.WithSwagger(
-				router.WithSummary("Delete a stream"),
-				router.WithDescription("Delete a stream and all associated data. Only streams owned by the authenticated user can be deleted."),
-				router.WithSuccessResponse(http.StatusNoContent, "Stream deleted successfully"),
+				router.WithSummary("Unpin a stream"),
+				router.WithDescription("Unpin this stream for the authenticated user. The stream itself and other users' pins remain. Only streams that the user has pinned can be unpinned."),
+				router.WithSuccessResponse(http.StatusNoContent, "Stream unpinned successfully"),
 			),
 		),
 	)
