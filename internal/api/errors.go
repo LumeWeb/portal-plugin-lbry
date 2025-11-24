@@ -23,6 +23,11 @@ var (
 	ErrKeyStreamNotFound           core.ErrorType = "stream_not_found"
 	ErrKeyStreamDeleteFailed       core.ErrorType = "stream_delete_failed"
 	ErrKeyStreamListFailed         core.ErrorType = "stream_list_failed"
+	ErrKeyDeviceCreateFailed       core.ErrorType = "device_create_failed"
+	ErrKeyDeviceUpdateFailed       core.ErrorType = "device_update_failed"
+	ErrKeyDeviceGetFailed          core.ErrorType = "device_get_failed"
+	ErrKeyDeviceDeleteFailed       core.ErrorType = "device_delete_failed"
+	ErrKeyDeviceListFailed         core.ErrorType = "device_list_failed"
 )
 
 // ErrorDetails represents detailed error information
