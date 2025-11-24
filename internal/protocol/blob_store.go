@@ -9,7 +9,6 @@ import (
 	"io"
 	"sort"
 
-	"github.com/samber/lo"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
@@ -128,44 +127,23 @@ func (bs *BlobStore) isSDBlob(hash string) (bool, []byte, error) {
 // getSDBlob handles SD blob retrieval with associated blobs
 func (bs *BlobStore) getSDBlob(_stream *pluginDb.Stream, hash string) ([]byte, error) {
 	// Build the SDBlob structure
+	streamHashBytes, err := hex.DecodeString(_stream.StreamHash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode stream hash %q: %w", _stream.StreamHash, err)
+	}
+
 	sdBlob := stream.SDBlob{
 		StreamName:        _stream.StreamName,
 		StreamType:        _stream.StreamType,
 		SuggestedFileName: _stream.SuggestedFileName,
 		Key:               _stream.KeyData,
+		StreamHash:        streamHashBytes,
 	}
 
-	// Get associated blobs for this stream
-	var streamBlobs []pluginDb.StreamBlob
-	err := bs.db.Where("stream_id = ?", _stream.ID).Order("blob_number").Find(&streamBlobs).Error
+	// Use shared utility to build blob infos from database
+	blobInfos, err := bs.buildBlobInfosFromDb(_stream.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get associated blobs for SD stream %q: %w", hash, err)
-	}
-
-	// Add blob hashes to the SD blob - collect all blobs for this stream
-	var blobInfos []stream.BlobInfo
-	for _, streamBlob := range streamBlobs {
-		// Get the blob details
-		var blob pluginDb.Blob
-		err = bs.db.Where("id = ?", streamBlob.BlobID).First(&blob).Error
-		if err != nil {
-			// Skip blobs that don't exist anymore - this may indicate data integrity issues
-			bs.logger.Warn("Skipping missing blob for stream",
-				zap.Uint64("blob_id", streamBlob.BlobID),
-				zap.Uint("stream_id", _stream.ID))
-			continue
-		}
-
-		// Create BlobInfo with default values since we don't have the full details
-		// Convert the string hash to bytes properly
-		blobHashBytes := lo.Ternary(len(blob.BlobHash) > 0, []byte(blob.BlobHash), []byte{})
-		blobInfo := stream.BlobInfo{
-			Length:   blob.BlobSize,
-			BlobNum:  streamBlob.BlobNumber,
-			BlobHash: blobHashBytes,
-			IV:       []byte{}, // Empty IV since we don't have this information
-		}
-		blobInfos = append(blobInfos, blobInfo)
 	}
 
 	// Sort blob infos by blob number to maintain order
@@ -265,6 +243,170 @@ func (bs *BlobStore) Put(hash string, data []byte) error {
 	}).Create(&_blob).Error
 }
 
+// processStreamBlobs handles the creation/update of stream blob associations
+func (bs *BlobStore) processStreamBlobs(streamID uint, blobInfos []stream.BlobInfo) error {
+	// Process each blob in the stream
+	for _, blobInfo := range blobInfos {
+		// Convert blob hash bytes to string
+		blobHash := hex.EncodeToString(blobInfo.BlobHash)
+
+		// Create or update blob record
+		blob := pluginDb.Blob{
+			BlobHash: blobHash,
+			BlobSize: int(blobInfo.Length),
+			IVData:   blobInfo.IV,
+		}
+
+		err := bs.db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "blob_hash"}},
+			DoUpdates: clause.Set{
+				{Column: clause.Column{Name: "blob_size"}, Value: blob.BlobSize},
+				{Column: clause.Column{Name: "iv_data"}, Value: blob.IVData},
+			},
+		}).Create(&blob).Error
+
+		if err != nil {
+			return fmt.Errorf("failed to upsert blob %q: %w", blobHash, err)
+		}
+
+		// Reload the blob to get the ID after upsert
+		err = bs.db.Where("blob_hash = ?", blobHash).First(&blob).Error
+		if err != nil {
+			return fmt.Errorf("failed to reload blob %q: %w", blobHash, err)
+		}
+
+		// Create stream blob association
+		streamBlob := pluginDb.StreamBlob{
+			StreamID:   uint64(streamID),
+			BlobID:     uint64(blob.ID),
+			BlobNumber: blobInfo.BlobNum,
+		}
+
+		err = bs.db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "stream_id"}, {Name: "blob_id"}},
+			DoUpdates: clause.Set{
+				{Column: clause.Column{Name: "blob_number"}, Value: streamBlob.BlobNumber},
+			},
+		}).Create(&streamBlob).Error
+
+		if err != nil {
+			return fmt.Errorf("failed to create stream blob association: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// buildBlobInfosFromDb retrieves and builds blob information from the database
+func (bs *BlobStore) buildBlobInfosFromDb(streamID uint) ([]stream.BlobInfo, error) {
+	// Get associated blobs for this stream
+	var streamBlobs []pluginDb.StreamBlob
+	err := bs.db.Where("stream_id = ?", uint64(streamID)).Order("blob_number").Find(&streamBlobs).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get associated blobs for stream %d: %w", streamID, err)
+	}
+
+	// Build blob infos from database records
+	var blobInfos []stream.BlobInfo
+
+	// First, collect all valid blobs to determine the highest blob number
+	// Store blob data to avoid duplicate queries
+	type validStreamBlob struct {
+		streamBlob pluginDb.StreamBlob
+		blob       pluginDb.Blob
+	}
+	var validStreamBlobs []validStreamBlob
+	maxBlobNumber := -1
+	for _, streamBlob := range streamBlobs {
+		// Get the blob details
+		var blob pluginDb.Blob
+		err = bs.db.Where("id = ?", streamBlob.BlobID).First(&blob).Error
+		if err != nil {
+			// For missing blobs, create a placeholder blob info with empty data
+			// This allows SD blob serialization to continue even with missing associated blobs
+			bs.logger.Warn("Creating placeholder for missing blob for stream",
+				zap.Uint64("blob_id", streamBlob.BlobID),
+				zap.Uint64("stream_id", uint64(streamID)))
+
+			// Create a placeholder blob info for the missing blob
+			blobInfo := stream.BlobInfo{
+				Length:   0, // Missing blobs have no size
+				BlobNum:  streamBlob.BlobNumber,
+				BlobHash: []byte{}, // Empty hash for missing blobs
+				IV:       []byte{}, // Empty IV for missing blobs
+			}
+			blobInfos = append(blobInfos, blobInfo)
+
+			// Update max blob number tracking
+			if streamBlob.BlobNumber > maxBlobNumber {
+				maxBlobNumber = streamBlob.BlobNumber
+			}
+			continue
+		}
+
+		// Skip invalid blobs (no hash or no IV) - these are essential for blob validity
+		if (len(blob.BlobHash) == 0 || len(blob.IVData) == 0) && blob.BlobSize > 0 {
+			bs.logger.Debug("Skipping invalid blob for stream",
+				zap.Uint64("blob_id", streamBlob.BlobID),
+				zap.Uint64("stream_id", uint64(streamID)),
+				zap.String("blob_hash", blob.BlobHash),
+				zap.Int("blob_size", blob.BlobSize),
+				zap.Int("iv_length", len(blob.IVData)))
+			continue
+		}
+
+		validStreamBlobs = append(validStreamBlobs, validStreamBlob{
+			streamBlob: streamBlob,
+			blob:       blob,
+		})
+		if streamBlob.BlobNumber > maxBlobNumber {
+			maxBlobNumber = streamBlob.BlobNumber
+		}
+	}
+
+	// Now process the valid blobs with the terminating empty blob logic
+	for _, validBlob := range validStreamBlobs {
+		streamBlob := validBlob.streamBlob
+		blob := validBlob.blob
+
+		// Skip empty blobs unless they are the terminating blob (highest blob number)
+		if blob.BlobSize == 0 && streamBlob.BlobNumber != maxBlobNumber {
+			bs.logger.Debug("Skipping non-terminating empty blob for stream",
+				zap.Uint64("blob_id", streamBlob.BlobID),
+				zap.Uint64("stream_id", uint64(streamID)),
+				zap.String("blob_hash", blob.BlobHash),
+				zap.Int("blob_size", blob.BlobSize),
+				zap.Int("blob_number", streamBlob.BlobNumber),
+				zap.Int("max_blob_number", maxBlobNumber))
+			continue
+		}
+
+		// Create BlobInfo with the stored data
+		// Convert the hex string hash to bytes properly
+		var blobHashBytes []byte
+		if len(blob.BlobHash) > 0 {
+			var err error
+			blobHashBytes, err = hex.DecodeString(blob.BlobHash)
+			if err != nil {
+				bs.logger.Warn("Failed to decode blob hash from hex string",
+					zap.String("blob_hash", blob.BlobHash),
+					zap.Uint64("blob_id", streamBlob.BlobID),
+					zap.Error(err))
+				continue
+			}
+		}
+		blobInfo := stream.BlobInfo{
+			Length:   blob.BlobSize,
+			BlobNum:  streamBlob.BlobNumber,
+			BlobHash: blobHashBytes,
+			IV:       blob.IVData, // Use stored IV from database
+		}
+		blobInfos = append(blobInfos, blobInfo)
+	}
+
+	return blobInfos, nil
+}
+
 // PutSD stores an SD blob as a stream in the database
 // SD blobs contain stream metadata and should be treated as streams, not regular blobs
 func (bs *BlobStore) PutSD(hash string, data []byte) error {
@@ -300,6 +442,14 @@ func (bs *BlobStore) PutSD(hash string, data []byte) error {
 
 	if err != nil {
 		return fmt.Errorf("failed to upsert SD stream: %w", err)
+	}
+
+	// Process child blobs using the shared utility
+	if len(sdBlob.BlobInfos) > 0 {
+		err = bs.processStreamBlobs(_stream.ID, sdBlob.BlobInfos)
+		if err != nil {
+			return fmt.Errorf("failed to process stream blobs: %w", err)
+		}
 	}
 
 	return nil

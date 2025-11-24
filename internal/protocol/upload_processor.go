@@ -80,6 +80,8 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 	metadata := source.GetMetadata()
 	applyMetadataToSDBlob(sdBlob, metadata)
 
+	sdBlob.StreamType = stream.StreamTypeLBRYFile
+
 	// Add SD handler if we have metadata
 	if sdBlob.StreamName != "" || sdBlob.SuggestedFileName != "" {
 		blob, err := sdBlob.ToBlob()
