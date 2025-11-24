@@ -2,14 +2,12 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 
 	"github.com/labstack/echo/v4"
 	"go.lumeweb.com/httputil"
 	mcontext "go.lumeweb.com/portal-middleware/context"
-	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal/api/dto"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
 	router "go.lumeweb.com/portal-router"
@@ -107,15 +105,8 @@ func (a *API) handleDeviceCreate(c echo.Context) error {
 		return nil
 	}
 
-	// Get the device service
-	deviceSvc := core.GetService[pluginCore.DeviceService](a.ctx, pluginCore.DEVICE_SERVICE)
-	if deviceSvc == nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceCreateFailed, err), http.StatusInternalServerError)
-		return nil
-	}
-
 	// Create device
-	device, err := deviceSvc.CreateDevice(ctx.Request().Context(), uint(userID), req.Name, req.IPAddress)
+	device, err := a.deviceService.CreateDevice(ctx.Request().Context(), uint(userID), req.Name, req.IPAddress)
 	if err != nil {
 		a.logger.Error("Failed to create device",
 			zap.Error(err),
@@ -170,14 +161,7 @@ func (a *API) handleDeviceUpdate(c echo.Context) error {
 		return nil
 	}
 
-	// Get the device service
-	deviceSvc := core.GetService[pluginCore.DeviceService](a.ctx, pluginCore.DEVICE_SERVICE)
-	if deviceSvc == nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceUpdateFailed, err), http.StatusInternalServerError)
-		return nil
-	}
-
-	device, err := deviceSvc.UpdateDeviceName(ctx.Request().Context(), uint(userID), uint(deviceID), req.Name)
+	device, err := a.deviceService.UpdateDeviceName(ctx.Request().Context(), uint(userID), uint(deviceID), req.Name)
 	if err != nil {
 		a.logger.Error("Failed to update device",
 			zap.Error(err),
@@ -220,13 +204,6 @@ func (a *API) handleDeviceList(c echo.Context) error {
 		return nil
 	}
 
-	// Get the device service
-	deviceSvc := core.GetService[pluginCore.DeviceService](a.ctx, pluginCore.DEVICE_SERVICE)
-	if deviceSvc == nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceListFailed, fmt.Errorf("device service not available")), http.StatusInternalServerError)
-		return nil
-	}
-
 	// Use queryutilhttp.ProcessListRequest for standardized HTTP handling
 	return queryutilhttp.ProcessListRequest(
 		c.Response(),
@@ -234,7 +211,7 @@ func (a *API) handleDeviceList(c echo.Context) error {
 		"devices",
 		// Create service function that includes user filtering
 		func(filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Device, int64, error) {
-			return deviceSvc.ListDevices(ctx.Request().Context(), uint(userID), filters, sorts, pagination)
+			return a.deviceService.ListDevices(ctx.Request().Context(), uint(userID), filters, sorts, pagination)
 		},
 		// Convert domain entities to DTOs
 		func(device *db.Device) *dto.DeviceResponse {
@@ -270,15 +247,8 @@ func (a *API) handleDeviceGet(c echo.Context) error {
 		return nil
 	}
 
-	// Get the device service
-	deviceSvc := core.GetService[pluginCore.DeviceService](a.ctx, pluginCore.DEVICE_SERVICE)
-	if deviceSvc == nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceGetFailed, err), http.StatusInternalServerError)
-		return nil
-	}
-
 	// Get device
-	device, err := deviceSvc.GetDevice(ctx.Request().Context(), uint(userID), uint(deviceID))
+	device, err := a.deviceService.GetDevice(ctx.Request().Context(), uint(userID), uint(deviceID))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			a.logger.Error("Device not found",
@@ -326,15 +296,8 @@ func (a *API) handleDeviceDelete(c echo.Context) error {
 		return nil
 	}
 
-	// Get the device service
-	deviceSvc := core.GetService[pluginCore.DeviceService](a.ctx, pluginCore.DEVICE_SERVICE)
-	if deviceSvc == nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceDeleteFailed, err), http.StatusInternalServerError)
-		return nil
-	}
-
 	// Delete device (idempotent)
-	err = deviceSvc.DeleteDevice(ctx.Request().Context(), uint(userID), uint(deviceID))
+	err = a.deviceService.DeleteDevice(ctx.Request().Context(), uint(userID), uint(deviceID))
 	if err != nil {
 		a.logger.Error("Failed to delete device",
 			zap.Error(err),

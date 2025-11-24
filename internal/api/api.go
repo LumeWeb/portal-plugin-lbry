@@ -31,6 +31,7 @@ type API struct {
 	logger          *core.Logger
 	workflowService core.WorkflowService
 	uploadService   pluginCore.UploadService
+	deviceService   pluginCore.DeviceService
 	tus             core.TusHandler
 }
 
@@ -49,6 +50,7 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 			api.logger = ctx.APILogger(api)
 			api.workflowService = core.GetService[core.WorkflowService](ctx, core.WORKFLOW_SERVICE)
 			api.uploadService = core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+			api.deviceService = core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
 
 			sproto, err := protocol.GetStorageProtocol()
 			if err != nil {

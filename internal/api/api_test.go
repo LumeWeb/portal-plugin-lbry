@@ -71,6 +71,7 @@ func getTestOptions() coreTesting.TestContextBuilderOption {
 		),
 		// Include mock service factory for plugin-specific upload service
 		coreTesting.WithMockServiceFactory(pluginCore.UPLOAD_SERVICE, pluginMocks.NewMockUploadService),
+		coreTesting.WithMockServiceFactory(pluginCore.DEVICE_SERVICE, pluginMocks.NewMockDeviceService),
 	)
 }
 
