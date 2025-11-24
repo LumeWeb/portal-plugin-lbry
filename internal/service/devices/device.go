@@ -183,7 +183,7 @@ func (s *DeviceServiceDefault) GetDevice(ctx context.Context, userID, id uint) (
 	err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("device not found")
+			return nil, err
 		}
 		return nil, fmt.Errorf("failed to get device: %w", err)
 	}

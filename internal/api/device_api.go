@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"go.lumeweb.com/queryutil"
 	queryutilhttp "go.lumeweb.com/queryutil/http"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // setupDeviceRoutes defines all device-related routes
@@ -278,11 +280,16 @@ func (a *API) handleDeviceGet(c echo.Context) error {
 	// Get device
 	device, err := deviceSvc.GetDevice(ctx.Request().Context(), uint(userID), uint(deviceID))
 	if err != nil {
-		a.logger.Error("Failed to get device",
-			zap.Error(err),
-
-			zap.Uint("device_id", uint(deviceID)))
-		_ = ctx.Error(NewError(ErrKeyDeviceGetFailed, err), http.StatusNotFound)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			a.logger.Error("Device not found",
+				zap.Uint("device_id", uint(deviceID)))
+			_ = ctx.Error(NewError(ErrKeyDeviceGetFailed, err), http.StatusNotFound)
+		} else {
+			a.logger.Error("Failed to get device",
+				zap.Error(err),
+				zap.Uint("device_id", uint(deviceID)))
+			_ = ctx.Error(NewError(ErrKeyDeviceGetFailed, err), http.StatusInternalServerError)
+		}
 		return nil
 	}
 
