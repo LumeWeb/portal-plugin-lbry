@@ -1,15 +1,17 @@
 package dto
 
 import (
+	"fmt"
 	"time"
 
 	z "github.com/Oudwins/zog"
 	"go.lumeweb.com/httputil"
 	"go.lumeweb.com/liblbry/blob"
+	"go.lumeweb.com/portal-plugin-lbry/internal/db"
 )
 
 // Ensure StreamResponse implements DTOResponse
-var _ httputil.DTOResponse[*StreamResponse] = (*StreamResponse)(nil)
+var _ httputil.DTOResponse[*db.Stream] = (*StreamResponse)(nil)
 var _ httputil.DTOValidator = (*StreamDeleteRequest)(nil)
 
 // StreamResponse represents a stream in the response
@@ -39,10 +41,22 @@ type StreamResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// FromModel creates a StreamResponse from a model
-func (s *StreamResponse) FromModel(model *StreamResponse) error {
-	// This will be implemented when we have the model structure
-	// For now, this is a placeholder
+// FromModel creates a StreamResponse from a db.Stream model
+func (s *StreamResponse) FromModel(model *db.Stream) error {
+	if model == nil {
+		return fmt.Errorf("model cannot be nil")
+	}
+
+	// Map fields from db.Stream to StreamResponse
+	s.ID = uint64(model.ID)
+	s.StreamHash = model.StreamHash
+	s.SDHash = model.SDHash
+	s.StreamName = model.StreamName
+	s.StreamType = model.StreamType
+	s.SuggestedFileName = model.SuggestedFileName
+	s.CreatedAt = model.CreatedAt
+	s.UpdatedAt = model.UpdatedAt
+
 	return nil
 }
 

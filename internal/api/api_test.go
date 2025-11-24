@@ -810,14 +810,14 @@ func TestAPIHandleStreamDelete(t *testing.T) {
 		{
 			name:           "stream not found",
 			sdHash:         "55d5aeff21b8d0f65239efef3d1287ebfa560a9c3e81c79c36b811b56fa3c1195682bcabe44513600cfd33fd65a0eb7e",
-			mockError:      errors.New("stream not found or access denied"),
+			mockError:      gorm.ErrRecordNotFound,
 			expectedStatus: http.StatusNotFound,
 			description:    "should return 404 when stream not found",
 		},
 		{
 			name:           "access denied",
 			sdHash:         "bde7be09c5010edee00d6d3db98ec0a0c4b37756757a6bd8bbbc1492a40025b391dd4e5fcf066d82e1c996b8427e1248",
-			mockError:      errors.New("stream not found or access denied"),
+			mockError:      gorm.ErrRecordNotFound,
 			expectedStatus: http.StatusNotFound,
 			description:    "should return 404 when user doesn't own stream",
 		},

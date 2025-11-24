@@ -25,6 +25,7 @@ import (
 	"go.lumeweb.com/portal/db/models"
 	"go.lumeweb.com/portal/service"
 	"go.lumeweb.com/queryutil"
+	"gorm.io/gorm"
 )
 
 const (
@@ -349,7 +350,7 @@ func TestUploadServiceDefault_DeleteStream_EdgeCases(t *testing.T) {
 				return testUploadHash1, nil
 			},
 			expectError:   true,
-			expectedError: "stream not found",
+			expectedError: gorm.ErrRecordNotFound.Error(),
 			description:   "should handle zero user ID gracefully",
 		},
 		{
@@ -361,7 +362,7 @@ func TestUploadServiceDefault_DeleteStream_EdgeCases(t *testing.T) {
 				return "", nil
 			},
 			expectError:      true,
-			expectedError:    "stream not found or access denied",
+			expectedError:    gorm.ErrRecordNotFound.Error(),
 			description:      "should handle empty SD hash gracefully",
 			skipSDHashLookup: true,
 		},
@@ -545,7 +546,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 				return "nonexistent_sd_hash", nil
 			},
 			expectError:   true,
-			expectedError: "stream not found or access denied",
+			expectedError: gorm.ErrRecordNotFound.Error(),
 			description:   "should return error when stream doesn't exist",
 		},
 		{
@@ -557,7 +558,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 				return streams[0].SDHash, nil
 			},
 			expectError:   true,
-			expectedError: "stream not found or access denied",
+			expectedError: gorm.ErrRecordNotFound.Error(),
 			description:   "should return error when user tries to delete another user's stream",
 		},
 	}

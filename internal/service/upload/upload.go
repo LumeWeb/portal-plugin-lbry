@@ -266,7 +266,7 @@ func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, fil
 // DeleteStream removes only the user's stream pin by SD hash
 func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sdHash string) error {
 	if userID == 0 {
-		return fmt.Errorf("stream not found")
+		return gorm.ErrRecordNotFound
 	}
 
 	// Find the stream by SD hash
@@ -274,7 +274,7 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 	err := s.db.WithContext(ctx).Where("sd_hash = ?", sdHash).First(&_stream).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("stream not found or access denied")
+			return gorm.ErrRecordNotFound
 		}
 		return fmt.Errorf("failed to find stream: %w", err)
 	}
@@ -291,7 +291,7 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("stream not found or access denied")
+			return gorm.ErrRecordNotFound
 		}
 		return fmt.Errorf("failed to check stream ownership: %w", err)
 	}

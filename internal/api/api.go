@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 	"go.lumeweb.com/queryutil"
 	queryutilhttp "go.lumeweb.com/queryutil/http"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 var _ core.API = (*API)(nil)
@@ -369,7 +371,7 @@ func (a *API) handleStreamDelete(c echo.Context) error {
 	// Delete the stream
 	err = uploadSvc.DeleteStream(ctx.Request().Context(), user, deleteRequest.SDHash)
 	if err != nil {
-		if err.Error() == "stream not found or access denied" {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			_ = ctx.Error(NewError(ErrKeyStreamNotFound, err), http.StatusNotFound)
 		} else {
 			_ = ctx.Error(NewError(ErrKeyStreamDeleteFailed, err), http.StatusInternalServerError)
