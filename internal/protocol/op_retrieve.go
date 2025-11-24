@@ -31,9 +31,9 @@ func (h *RetrieveOperationHandler) Execute(ctx context.Context, req *models.Requ
 		return err
 	}
 
-	// Create CID and convert to LBRY hash using shared helper
+	// Create CID and convert to LBRY hash
 	cidObj := cid.NewCidV1(cid.Raw, req.Hash)
-	lbryHash, err := internal.CIDToLBRYHash(cidObj)
+	lbryHash, err := stream.FromMultihash(cidObj.String())
 	if err != nil {
 		return fmt.Errorf("failed to convert CID %q to LBRY hash: %w", cidObj.String(), err)
 	}
@@ -53,12 +53,10 @@ func (h *RetrieveOperationHandler) Execute(ctx context.Context, req *models.Requ
 		return fmt.Errorf("failed to acquire SD blob for hash %q: %w", lbryHash, err)
 	}
 
-	// Log successful acquisition for debugging (key fields only for large blobs)
+	// Log successful acquisition for debugging
 	h.Logger().Debug("Successfully acquired SD blob",
 		zap.String("lbry_hash", lbryHash),
-		zap.String("sd_blob_hash", blob.SDBlobHash),
-		zap.Int("content_hashes_count", len(blob.ContentHashes)),
-		zap.Int("chunk_sizes_count", len(blob.ChunkSizes)))
+		zap.Any("blob", blob))
 
 	h.Logger().Debug("Created stream result from SD blob",
 		zap.String("sd_hash", lbryHash),
