@@ -157,7 +157,7 @@ func (a *API) handleDeviceUpdate(c echo.Context) error {
 	deviceIDStr := c.Param("id")
 	deviceID, err := strconv.ParseUint(deviceIDStr, 10, 32)
 	if err != nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceUpdateFailed, err), http.StatusBadRequest)
+		_ = ctx.Error(NewError(ErrKeyDeviceGetFailed, err), http.StatusBadRequest)
 		return nil
 	}
 
@@ -264,7 +264,7 @@ func (a *API) handleDeviceGet(c echo.Context) error {
 	deviceIDStr := c.Param("id")
 	deviceID, err := strconv.ParseUint(deviceIDStr, 10, 32)
 	if err != nil {
-		_ = ctx.Error(NewError(ErrKeyDeviceUpdateFailed, err), http.StatusBadRequest)
+		_ = ctx.Error(NewError(ErrKeyDeviceDeleteFailed, err), http.StatusBadRequest)
 		return nil
 	}
 

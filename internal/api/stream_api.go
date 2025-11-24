@@ -236,8 +236,9 @@ func (a *API) handleStreamPin(c echo.Context) error {
 		core.WithWorkflowStorageHash(multihash),
 	)
 	if err != nil {
-		// If workflow initiation fails, return the error
-		return err
+		// If workflow initiation fails, return a structured API error
+		_ = ctx.Error(NewError(ErrKeyStreamProcessingFailed, err), http.StatusInternalServerError)
+		return nil
 	}
 
 	return ctx.NoContent(http.StatusCreated)

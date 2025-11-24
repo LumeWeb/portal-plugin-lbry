@@ -33,7 +33,7 @@ type DeviceResponse struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// FromModel creates a DeviceResponse from a db.Device model
+// FromModel populates the receiver from another *DeviceResponse.
 func (d *DeviceResponse) FromModel(model *DeviceResponse) error {
 	if model != nil {
 		d.ID = model.ID
