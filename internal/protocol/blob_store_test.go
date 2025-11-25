@@ -157,20 +157,16 @@ func createTestBlobHashBytes(hash1, hash2 string) ([]byte, []byte, error) {
 }
 
 // Helper functions for mock storage expectations
-func setupMockDownloadSuccess(mockStorage *coreMocks.MockStorageService, hash string, data string) {
+func setupMockDownloadSuccess(tb testing.TB, mockStorage *coreMocks.MockStorageService, hash string, data string) {
 	storageHash, err := internal.LBRYHashToStorageHash(hash)
-	if err != nil {
-		return
-	}
+	require.NoError(tb, err, "failed to convert hash for mock setup")
 	mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).
 		Return(io.NopCloser(strings.NewReader(data)), nil)
 }
 
-func setupMockDownloadError(mockStorage *coreMocks.MockStorageService, hash string, errorMsg string) {
+func setupMockDownloadError(tb testing.TB, mockStorage *coreMocks.MockStorageService, hash string, errorMsg string) {
 	storageHash, err := internal.LBRYHashToStorageHash(hash)
-	if err != nil {
-		return
-	}
+	require.NoError(tb, err, "failed to convert hash for mock setup")
 	mockStorage.EXPECT().DownloadObject(mock.Anything, mock.Anything, storageHash, int64(0)).
 		Return(nil, fmt.Errorf("%s", errorMsg))
 }
@@ -185,20 +181,16 @@ func setupMockUploadError(mockStorage *coreMocks.MockStorageService, errorMsg st
 		Return(nil, fmt.Errorf("%s", errorMsg))
 }
 
-func setupMockDeleteSuccess(mockStorage *coreMocks.MockStorageService, hash string) {
+func setupMockDeleteSuccess(tb testing.TB, mockStorage *coreMocks.MockStorageService, hash string) {
 	storageHash, err := internal.LBRYHashToStorageHash(hash)
-	if err != nil {
-		return
-	}
+	require.NoError(tb, err, "failed to convert hash for mock setup")
 	mockStorage.EXPECT().DeleteObject(mock.Anything, mock.Anything, storageHash).
 		Return(nil)
 }
 
-func setupMockDeleteError(mockStorage *coreMocks.MockStorageService, hash string, errorMsg string) {
+func setupMockDeleteError(tb testing.TB, mockStorage *coreMocks.MockStorageService, hash string, errorMsg string) {
 	storageHash, err := internal.LBRYHashToStorageHash(hash)
-	if err != nil {
-		return
-	}
+	require.NoError(tb, err, "failed to convert hash for mock setup")
 	mockStorage.EXPECT().DeleteObject(mock.Anything, mock.Anything, storageHash).
 		Return(fmt.Errorf("%s", errorMsg))
 }
@@ -238,7 +230,7 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 		insertTestBlob(tb, ctx, testBlobHash1, 100, nil)
 
 		// Set up mock expectation for when blob exists in DB but not in storage
-		setupMockDownloadError(mockStorage, testBlobHash1, "object not found")
+		setupMockDownloadError(tb, mockStorage, testBlobHash1, "object not found")
 
 		// Act - Test when blob exists in DB but not in storage
 		has, err = store.Has(testBlobHash1)
@@ -249,7 +241,7 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 		mockStorage = createMockStorage(tb)
 		store.storageSvc = mockStorage
 
-		setupMockDownloadSuccess(mockStorage, testBlobHash1, testData1)
+		setupMockDownloadSuccess(tb, mockStorage, testBlobHash1, testData1)
 
 		// Act - Test when blob exists in both DB and storage
 		has, err = store.Has(testBlobHash1)
@@ -268,7 +260,7 @@ func TestLBRYBlobStore_Get(t *testing.T) {
 		testData := []byte(testData1)
 		insertTestBlob(tb, ctx, testBlobHash1, len(testData), nil)
 
-		setupMockDownloadSuccess(mockStorage, testBlobHash1, testData1)
+		setupMockDownloadSuccess(tb, mockStorage, testBlobHash1, testData1)
 
 		// Act
 		data, err := store.Get(testBlobHash1)
@@ -370,11 +362,6 @@ func TestLBRYBlobStore_Get_SDBlobNoAssociatedBlobs(t *testing.T) {
 		err = ctx.DB().Create(&_stream).Error
 		require.NoError(tb, err)
 
-		// Update the SD blob with the correct stream hash
-		sdBlob.StreamHash, _ = hex.DecodeString(streamHash)
-		expectedData, err = sdBlob.ToBlob()
-		require.NoError(tb, err)
-
 		// Act - use the correct hash that matches the blob content
 		data, err := store.Get(correctHash)
 
@@ -428,7 +415,7 @@ func TestLBRYBlobStore_Get_SDBlobMissingAssociatedBlobs(t *testing.T) {
 		// Now get the correct hash after updating the blob content
 		correctHash := sdBlob.HashHex()
 
-		stream := db.Stream{
+		_stream := db.Stream{
 			StreamHash:        streamHash,
 			SDHash:            correctHash, // Use the hash of the updated blob
 			StreamName:        sdBlob.StreamName,
@@ -436,12 +423,12 @@ func TestLBRYBlobStore_Get_SDBlobMissingAssociatedBlobs(t *testing.T) {
 			SuggestedFileName: sdBlob.SuggestedFileName,
 			KeyData:           sdBlob.Key,
 		}
-		err = ctx.DB().Create(&stream).Error
+		err = ctx.DB().Create(&_stream).Error
 		require.NoError(tb, err)
 
 		// Create stream_blob association with a blob that doesn't exist
 		streamBlob := db.StreamBlob{
-			StreamID:   uint64(stream.ID),
+			StreamID:   uint64(_stream.ID),
 			BlobID:     999, // Non-existent blob ID
 			BlobNumber: 0,
 		}
@@ -590,7 +577,7 @@ func TestLBRYBlobStore_Delete(t *testing.T) {
 		ast := assert.New(tb)
 		store, mockStorage := createTestStore(tb, ctx)
 
-		setupMockDeleteSuccess(mockStorage, testBlobHash2)
+		setupMockDeleteSuccess(tb, mockStorage, testBlobHash2)
 
 		insertTestBlob(tb, ctx, testBlobHash2, 100, nil)
 
@@ -622,7 +609,7 @@ func TestLBRYBlobStore_Get_StorageError(t *testing.T) {
 		require.NoError(tb, err)
 
 		// Set up mock expectations for storage error
-		setupMockDownloadError(mockStorage, testBlobHash1, "storage connection failed")
+		setupMockDownloadError(tb, mockStorage, testBlobHash1, "storage connection failed")
 
 		// Act
 		data, err := store.Get(testBlobHash1)
@@ -776,6 +763,12 @@ func TestLBRYBlobStore_PutSD_WithChildBlobs(t *testing.T) {
 		ast.NoError(err)
 		ast.Len(streamBlobs, 2)
 
+		// Verify no duplicate blobs were created
+		var totalBlobCount int64
+		err = ctx.DB().Model(&db.Blob{}).Where("blob_hash IN ?", []string{testBlobHash1, testBlobHash2}).Count(&totalBlobCount).Error
+		ast.NoError(err)
+		ast.Equal(int64(2), totalBlobCount, "Should not create duplicate blob records")
+
 		// Verify stream blob associations
 		ast.Equal(0, streamBlobs[0].BlobNumber)
 		ast.Equal(1, streamBlobs[1].BlobNumber)
@@ -888,7 +881,7 @@ func TestLBRYBlobStore_Delete_StorageError(t *testing.T) {
 		store.storageSvc = mockStorage
 
 		// Set up mock expectations for storage error
-		setupMockDeleteError(mockStorage, testBlobHash1, "storage delete failed: network timeout")
+		setupMockDeleteError(tb, mockStorage, testBlobHash1, "storage delete failed: network timeout")
 
 		// Insert blob into DB
 		blob := db.Blob{
@@ -1456,7 +1449,7 @@ func TestLBRYBlobStore_BuildBlobInfosFromDb_RoundTripHashConsistency(t *testing.
 				}
 			}
 
-			require.NotNil(t, foundBlob, "Should find blob info for test case: %s", tc.name)
+			require.NotNil(tb, foundBlob, "Should find blob info for test case: %s", tc.name)
 			if foundBlob != nil {
 				ast.Equal(tc.hash, foundBlob.BlobHash,
 					"Hash should match original for test case: %s", tc.name)

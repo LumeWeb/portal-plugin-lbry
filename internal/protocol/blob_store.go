@@ -245,56 +245,58 @@ func (bs *BlobStore) Put(hash string, data []byte) error {
 
 // processStreamBlobs handles the creation/update of stream blob associations
 func (bs *BlobStore) processStreamBlobs(streamID uint, blobInfos []stream.BlobInfo) error {
-	// Process each blob in the stream
-	for _, blobInfo := range blobInfos {
-		// Convert blob hash bytes to string
-		blobHash := hex.EncodeToString(blobInfo.BlobHash)
+	return bs.db.Transaction(func(tx *gorm.DB) error {
+		// Process each blob in the stream
+		for _, blobInfo := range blobInfos {
+			// Convert blob hash bytes to string
+			blobHash := hex.EncodeToString(blobInfo.BlobHash)
 
-		// Create or update blob record
-		blob := pluginDb.Blob{
-			BlobHash: blobHash,
-			BlobSize: int(blobInfo.Length),
-			IVData:   blobInfo.IV,
+			// Create or update blob record
+			blob := pluginDb.Blob{
+				BlobHash: blobHash,
+				BlobSize: int(blobInfo.Length),
+				IVData:   blobInfo.IV,
+			}
+
+			err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "blob_hash"}},
+				DoUpdates: clause.Set{
+					{Column: clause.Column{Name: "blob_size"}, Value: blob.BlobSize},
+					{Column: clause.Column{Name: "iv_data"}, Value: blob.IVData},
+				},
+			}).Create(&blob).Error
+
+			if err != nil {
+				return fmt.Errorf("failed to upsert blob %q: %w", blobHash, err)
+			}
+
+			// Reload the blob to get the ID after upsert
+			err = tx.Where("blob_hash = ?", blobHash).First(&blob).Error
+			if err != nil {
+				return fmt.Errorf("failed to reload blob %q: %w", blobHash, err)
+			}
+
+			// Create stream blob association
+			streamBlob := pluginDb.StreamBlob{
+				StreamID:   uint64(streamID),
+				BlobID:     uint64(blob.ID),
+				BlobNumber: blobInfo.BlobNum,
+			}
+
+			err = tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "stream_id"}, {Name: "blob_id"}},
+				DoUpdates: clause.Set{
+					{Column: clause.Column{Name: "blob_number"}, Value: streamBlob.BlobNumber},
+				},
+			}).Create(&streamBlob).Error
+
+			if err != nil {
+				return fmt.Errorf("failed to create stream blob association: %w", err)
+			}
 		}
 
-		err := bs.db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "blob_hash"}},
-			DoUpdates: clause.Set{
-				{Column: clause.Column{Name: "blob_size"}, Value: blob.BlobSize},
-				{Column: clause.Column{Name: "iv_data"}, Value: blob.IVData},
-			},
-		}).Create(&blob).Error
-
-		if err != nil {
-			return fmt.Errorf("failed to upsert blob %q: %w", blobHash, err)
-		}
-
-		// Reload the blob to get the ID after upsert
-		err = bs.db.Where("blob_hash = ?", blobHash).First(&blob).Error
-		if err != nil {
-			return fmt.Errorf("failed to reload blob %q: %w", blobHash, err)
-		}
-
-		// Create stream blob association
-		streamBlob := pluginDb.StreamBlob{
-			StreamID:   uint64(streamID),
-			BlobID:     uint64(blob.ID),
-			BlobNumber: blobInfo.BlobNum,
-		}
-
-		err = bs.db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "stream_id"}, {Name: "blob_id"}},
-			DoUpdates: clause.Set{
-				{Column: clause.Column{Name: "blob_number"}, Value: streamBlob.BlobNumber},
-			},
-		}).Create(&streamBlob).Error
-
-		if err != nil {
-			return fmt.Errorf("failed to create stream blob association: %w", err)
-		}
-	}
-
-	return nil
+		return nil
+	})
 }
 
 // buildBlobInfosFromDb retrieves and builds blob information from the database
@@ -444,9 +446,17 @@ func (bs *BlobStore) PutSD(hash string, data []byte) error {
 		return fmt.Errorf("failed to upsert SD stream: %w", err)
 	}
 
+	// After upsert, retrieve the actual stream ID from the database
+	// The in-memory _stream.ID may be unset or stale after OnConflict().Create()
+	var actualStream pluginDb.Stream
+	err = bs.db.First(&actualStream, "stream_hash = ?", _stream.StreamHash).Error
+	if err != nil {
+		return fmt.Errorf("failed to retrieve stream after upsert: %w", err)
+	}
+
 	// Process child blobs using the shared utility
 	if len(sdBlob.BlobInfos) > 0 {
-		err = bs.processStreamBlobs(_stream.ID, sdBlob.BlobInfos)
+		err = bs.processStreamBlobs(actualStream.ID, sdBlob.BlobInfos)
 		if err != nil {
 			return fmt.Errorf("failed to process stream blobs: %w", err)
 		}

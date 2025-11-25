@@ -130,6 +130,17 @@ func waitForWorkflowCompletion(tb coreTesting.TB, ctx coreTesting.TestContext, u
 	uploadSvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
 	require.NotNil(tb, uploadSvc, "Upload service should be available")
 
+	// First verify that a workflow was actually created
+	_, initialTotal, err := workflowSvc.ListWorkflowInstances(
+		ctx,
+		userID,
+		queryutil.Filters(),
+		[]queryutil.Sort{},
+		queryutil.Pagination{Start: 0, End: 10},
+	)
+	require.NoError(tb, err, "Should be able to list workflow instances")
+	require.Greater(tb, initialTotal, int64(0), "At least one workflow should have been created")
+
 	// Wait for workflow completion with realistic timing
 	maxWait := 30 * time.Second
 	pollInterval := 1 * time.Second
@@ -240,6 +251,7 @@ func createTestBlobAcquirer(ctx coreTesting.TestContext) (client.StreamAcquirer,
 
 	t.Cleanup(func() {
 		peerTransfer.Stop()
+		dhtNode.Shutdown()
 	})
 
 	return streamAcquirer, nil
