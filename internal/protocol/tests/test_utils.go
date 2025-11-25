@@ -7,6 +7,7 @@ import (
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db/migrations"
 	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
+	"go.lumeweb.com/portal-plugin-lbry/internal/service/devices"
 	"go.lumeweb.com/portal-plugin-lbry/internal/service/upload"
 	pluginTesting "go.lumeweb.com/portal-plugin-lbry/internal/testing"
 	"go.lumeweb.com/portal/core"
@@ -23,6 +24,7 @@ func GetCoreTestOptions() []coreTesting.TestContextBuilderOption {
 		coreTesting.WithServiceFactory(core.REQUEST_SERVICE, service.NewRequestService),
 		coreTesting.WithServiceFactory(core.WORKFLOW_SERVICE, service.NewWorkflowCoordinator),
 		coreTesting.WithServiceFactory(core.USER_SERVICE, service.NewUserService),
+		coreTesting.WithServiceFactory(core.AUTH_SERVICE, service.NewAuthService),
 	}
 }
 
@@ -33,11 +35,13 @@ func GetPluginTestOptions() []coreTesting.TestContextBuilderOption {
 
 	return []coreTesting.TestContextBuilderOption{
 		coreTesting.WithServiceFactory(pluginCore.UPLOAD_SERVICE, upload.NewUploadService),
+		coreTesting.WithServiceFactory(pluginCore.DEVICE_SERVICE, devices.NewDeviceService),
 		coreTesting.WithProtocol(internal.ProtocolName, protocol.NewProtocol),
 		coreTesting.WithConfig("plugin.lbry.protocol.peer_port", uint(freePeerPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.dht_port", uint(freeDhtPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeDhtPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.fixed_peers", []string{"s1.lbry.network:4444"}),
+		coreTesting.WithAPIID(internal.ProtocolName),
 		coreTesting.WithProtocolConfig(internal.ProtocolName, pluginConfig.ProtocolConfig{
 			PeerPort:      uint(freePeerPort),
 			DHTPort:       uint(freeDhtPort),
