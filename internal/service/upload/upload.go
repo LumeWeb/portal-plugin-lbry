@@ -346,23 +346,23 @@ func (s *UploadServiceDefault) GetMissingBlobs(ctx context.Context, userID uint,
 func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID uint, streamResult *stream.StreamResult) error {
 	// First, find the pending stream by SD hash and user ID to get the stream ID
 	var pendingStream db.PendingStream
-	err := s.db.WithContext(ctx).
+	findErr := s.db.WithContext(ctx).
 		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
 		First(&pendingStream).Error
-	if err != nil {
+	if findErr != nil {
 		// If the pending stream is not found, continue with cleanup (no error)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
 			// Continue with cleanup of pending streams by SD hash
 		} else {
 			// Return error for other database issues
-			return fmt.Errorf("failed to find pending stream: %w", err)
+			return fmt.Errorf("failed to find pending stream: %w", findErr)
 		}
 	}
 
 	// Clean up regular pending blobs associated with this specific stream
 	// Only do this if we found a pending stream
-	if err == nil {
-		err = s.db.WithContext(ctx).
+	if findErr == nil {
+		err := s.db.WithContext(ctx).
 			Where("user_id = ? AND stream_id = ?", userID, pendingStream.ID).
 			Delete(&db.PendingBlob{}).Error
 		if err != nil {
@@ -372,7 +372,7 @@ func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID u
 
 	// Clean up pending stream (SD blob) by SD hash
 	// This will succeed even if no record exists (no-op)
-	err = s.db.WithContext(ctx).
+	err := s.db.WithContext(ctx).
 		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
 		Delete(&db.PendingStream{}).Error
 	if err != nil {

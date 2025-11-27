@@ -164,20 +164,19 @@ func getReflectorBlobPath(userID uint, blobHash string) string {
 
 // Has checks if a blob with the given hash exists in temporary storage
 func (rs *ReflectorStore) Has(ctx context.Context, hash string) (bool, error) {
-	// For pending blobs, we need to extract user ID from context or use a default approach
-	// Since this is primarily used for upload workflow, we'll check if the blob exists
-	// by attempting to get it - this is a simple approach for the reflector store
-
-	// Try to get the blob to check if it exists
-	data, err := rs.Get(ctx, hash)
-	if err != nil || len(data) == 0 {
-		// If there's an error getting the blob, or no data, assume it doesn't exist
+	userID := rs.extractUserIDFromContext(ctx)
+	if userID == 0 {
 		return false, nil
 	}
 
-	// We successfully got the data, so the blob exists
-	_ = data
-	return true, nil
+	// Check existence without reading full data
+	exists, err := rs.storageSvc.S3TemporaryUploadExists(ctx, rs.proto, getReflectorBlobPath(userID, hash))
+	if err != nil {
+		// If there's an error checking existence, assume it doesn't exist
+		return false, nil
+	}
+
+	return exists, nil
 }
 
 // isTerminatingBlob checks if a blob is a terminating blob (hash is empty)

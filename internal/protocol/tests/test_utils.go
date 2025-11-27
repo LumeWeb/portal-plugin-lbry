@@ -153,26 +153,32 @@ func createTestBlobAcquirer(ctx coreTesting.TestContext) (client.StreamAcquirer,
 	// Create memory storage for caching blobs
 	memoryStore := memory.NewMemoryStore()
 
-	// Create DHT node for peer discovery on port 4445
+	// Get a free port for DHT to avoid conflicts in parallel tests
+	freeDhtPort, err := pluginTesting.GetFreePort()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get free DHT port: %w", err)
+	}
+	dhtAddress := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", freeDhtPort))
+
+	// Create DHT node for peer discovery on dynamically allocated port
 	dhtNode, err := protocol.NewDHTNodeWithDefaults(
 		protocol.WithDHTLogger(logger),
-		protocol.WithDHTAddress("127.0.0.1:4445"),
+		protocol.WithDHTAddress(dhtAddress),
 		protocol.WithDHTSeedNodes([]string{"0.0.0.1"}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DHT node: %w", err)
 	}
 
-	protoCfg := core.GetProtocolConfig[*pluginConfig.ProtocolConfig](ctx, internal.ProtocolName)
-
 	// Create peer transfer with DHT discovery using DefaultPeerClientFactory
+	// Use the same DHT port for fixed peers to ensure connectivity
 	peerTransfer, err := peer_transfer.NewPeerTransfer(
 		dhtNode,
 		protocol.DefaultPeerClientFactory(),
 		peer_transfer.WithPeerTransferLogger(logger),
 		peer_transfer.WithPeerTransferTimeout(30*time.Second),
 		peer_transfer.WithPeerTransferMaxPeers(5),
-		peer_transfer.WithPeerTransferFixedPeers([]string{net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", protoCfg.PeerPort))}),
+		peer_transfer.WithPeerTransferFixedPeers([]string{dhtAddress}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create peer transfer: %w", err)

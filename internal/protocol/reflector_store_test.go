@@ -389,3 +389,207 @@ func TestReflectorStore_PutSD_ErrorCases(t *testing.T) {
 		}
 	})
 }
+
+func TestReflectorStore_Has(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		// Create mock services
+		mockStorage := coreMocks.NewMockStorageService(tb)
+		mockDeviceService := pluginMocks.NewMockDeviceService(tb)
+		store.storageSvc = mockStorage
+		store.deviceSvc = mockDeviceService
+
+		testHash := "test_hash_123"
+		userID := uint(123)
+		testIPAddress := "192.168.1.100"
+
+		// Set up mock expectations
+		mockStorage.EXPECT().S3TemporaryUploadExists(mock.Anything, mock.Anything, "123/test_hash_123").
+			Return(true, nil).Once()
+
+		testDevice := &pluginDb.Device{
+			Model: gorm.Model{
+				ID: 1,
+			},
+			UserID:    userID,
+			Name:      "test-device",
+			IPAddress: testIPAddress,
+		}
+		mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, testIPAddress).
+			Return(testDevice, nil).Once()
+
+		// Create context with reflector source and IP address
+		ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
+		ctxWithIP := context.WithValue(ctxWithSource, protocol.IPAddressContextKey, testIPAddress)
+
+		// Act
+		exists, err := store.Has(ctxWithIP, testHash)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.True(t, exists)
+	})
+}
+
+func TestReflectorStore_Has_NotExisting(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		// Create mock services
+		mockStorage := coreMocks.NewMockStorageService(tb)
+		mockDeviceService := pluginMocks.NewMockDeviceService(tb)
+		store.storageSvc = mockStorage
+		store.deviceSvc = mockDeviceService
+
+		testHash := "test_hash_456"
+		userID := uint(456)
+		testIPAddress := "192.168.1.100"
+
+		// Set up mock expectations - blob doesn't exist
+		mockStorage.EXPECT().S3TemporaryUploadExists(mock.Anything, mock.Anything, "456/test_hash_456").
+			Return(false, nil).Once()
+
+		testDevice := &pluginDb.Device{
+			Model: gorm.Model{
+				ID: 1,
+			},
+			UserID:    userID,
+			Name:      "test-device",
+			IPAddress: testIPAddress,
+		}
+		mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, testIPAddress).
+			Return(testDevice, nil).Once()
+
+		// Create context with reflector source and IP address
+		ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
+		ctxWithIP := context.WithValue(ctxWithSource, protocol.IPAddressContextKey, testIPAddress)
+
+		// Act
+		exists, err := store.Has(ctxWithIP, testHash)
+
+		// Assert
+		assert.NoError(t, err)
+		assert.False(t, exists)
+	})
+}
+
+func TestReflectorStore_Has_NoUserID(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		testHash := "test_hash_789"
+
+		testCases := []struct {
+			name string
+			ctx  context.Context
+		}{
+			{
+				name: "no context values",
+				ctx:  context.Background(),
+			},
+			{
+				name: "reflector source without IP",
+				ctx:  context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector),
+			},
+			{
+				name: "peer source with IP",
+				ctx: func() context.Context {
+					ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourcePeer)
+					return context.WithValue(ctxWithSource, protocol.IPAddressContextKey, "192.168.1.100")
+				}(),
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Act
+				exists, err := store.Has(tc.ctx, testHash)
+
+				// Assert
+				assert.NoError(t, err)
+				assert.False(t, exists) // Should return false when user ID cannot be extracted
+			})
+		}
+	})
+}
+
+func TestReflectorStore_Has_StorageError(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		// Create mock services
+		mockStorage := coreMocks.NewMockStorageService(tb)
+		mockDeviceService := pluginMocks.NewMockDeviceService(tb)
+		store.storageSvc = mockStorage
+		store.deviceSvc = mockDeviceService
+
+		testHash := "test_hash_error"
+		userID := uint(999)
+		testIPAddress := "192.168.1.100"
+
+		// Set up mock expectations - storage service returns error
+		mockStorage.EXPECT().S3TemporaryUploadExists(mock.Anything, mock.Anything, "999/test_hash_error").
+			Return(false, assert.AnError).Once()
+
+		testDevice := &pluginDb.Device{
+			Model: gorm.Model{
+				ID: 1,
+			},
+			UserID:    userID,
+			Name:      "test-device",
+			IPAddress: testIPAddress,
+		}
+		mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, testIPAddress).
+			Return(testDevice, nil).Once()
+
+		// Create context with reflector source and IP address
+		ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
+		ctxWithIP := context.WithValue(ctxWithSource, protocol.IPAddressContextKey, testIPAddress)
+
+		// Act
+		exists, err := store.Has(ctxWithIP, testHash)
+
+		// Assert
+		assert.NoError(t, err)  // Should not return error, just false
+		assert.False(t, exists) // Should return false when storage service errors
+	})
+}
+
+func TestReflectorStore_Has_DeviceLookupError(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		// Create mock services
+		mockDeviceService := pluginMocks.NewMockDeviceService(tb)
+		store.deviceSvc = mockDeviceService
+
+		testHash := "test_hash_device_error"
+		testIPAddress := "192.168.1.100"
+
+		// Set up mock expectations - device service returns error
+		mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, testIPAddress).
+			Return(nil, assert.AnError).Once()
+
+		// Create context with reflector source and IP address
+		ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
+		ctxWithIP := context.WithValue(ctxWithSource, protocol.IPAddressContextKey, testIPAddress)
+
+		// Act
+		exists, err := store.Has(ctxWithIP, testHash)
+
+		// Assert
+		assert.NoError(t, err)  // Should not return error, just false
+		assert.False(t, exists) // Should return false when device lookup fails
+	})
+}

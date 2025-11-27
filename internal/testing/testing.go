@@ -9,13 +9,11 @@ import (
 // portTracker manages the allocation and tracking of ports to prevent collisions
 type portTracker struct {
 	mu          sync.RWMutex
-	allocated   map[int]bool // Currently allocated ports
 	history     map[int]bool // All ports ever allocated (to prevent reuse)
 	maxAttempts int          // Maximum attempts to find a unique port
 }
 
 var globalTracker = &portTracker{
-	allocated:   make(map[int]bool),
 	history:     make(map[int]bool),
 	maxAttempts: 100,
 }
@@ -38,8 +36,7 @@ func (pt *portTracker) getUniquePort() (int, error) {
 		pt.mu.Lock()
 		// Check if this port was ever used before
 		if !pt.history[port] {
-			// Mark as allocated and add to history
-			pt.allocated[port] = true
+			// Mark as used in history
 			pt.history[port] = true
 			pt.mu.Unlock()
 			return port, nil
@@ -47,8 +44,7 @@ func (pt *portTracker) getUniquePort() (int, error) {
 		pt.mu.Unlock()
 
 		// Port was used before, try again
-		// Close the listener to free the kernel port
-		pt.closeKernelPort(port)
+		// Note: The port is already released by getKernelFreePort's defer l.Close()
 	}
 
 	return 0, &PortAllocationError{Attempts: pt.maxAttempts}
@@ -67,19 +63,6 @@ func (pt *portTracker) getKernelFreePort() (int, error) {
 	}
 	defer l.Close()
 	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
-// closeKernelPort closes a kernel-allocated port
-func (pt *portTracker) closeKernelPort(port int) {
-	addr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort("localhost", string(rune(port))))
-	if err != nil {
-		return
-	}
-
-	l, err := net.ListenTCP("tcp", addr)
-	if err == nil {
-		l.Close()
-	}
 }
 
 // PortAllocationError is returned when unable to allocate a unique port
