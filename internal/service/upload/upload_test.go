@@ -52,9 +52,18 @@ func setupStorageMock(storage *coreMocks.MockStorageService, expectedUploadID st
 }
 
 func getTestOptions() coreTesting.TestContextBuilderOption {
-	var freePeerPort, _ = pluginTesting.GetFreePort()
-	var freeDhtPort, _ = pluginTesting.GetFreePort()
-	var freeReflectorPort, _ = pluginTesting.GetFreePort()
+	freePeerPort, err := pluginTesting.GetFreePort()
+	if err != nil {
+		panic(fmt.Sprintf("failed to get free peer port: %v", err))
+	}
+	freeDhtPort, err := pluginTesting.GetFreePort()
+	if err != nil {
+		panic(fmt.Sprintf("failed to get free DHT port: %v", err))
+	}
+	freeReflectorPort, err := pluginTesting.GetFreePort()
+	if err != nil {
+		panic(fmt.Sprintf("failed to get free reflector port: %v", err))
+	}
 
 	return coreTesting.CombineOptions(
 		coreTesting.WithServiceFactory(core.WORKFLOW_SERVICE, service.NewWorkflowCoordinator),
