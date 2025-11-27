@@ -43,7 +43,7 @@ func (a *API) setupDeviceRoutes() []router.Route {
 			router.WithAccess(core.ACCESS_USER_ROLE),
 			router.WithSwagger(
 				router.WithSummary("Update a device"),
-				router.WithPathParam("id", "The ID of the device to update", "string"),
+				router.WithPathParam("id", "The ID of the device to update", "integer"),
 				router.WithDescription("Update an existing device in the whitelist. This endpoint requires authentication and is idempotent."),
 				router.WithRequestBody(&dto.UpdateDeviceRequest{}, "Device update request", true),
 				router.WithSuccessResponse(http.StatusOK, "Device updated successfully", router.WithJSONContent(&dto.DeviceResponse{})),
@@ -69,7 +69,7 @@ func (a *API) setupDeviceRoutes() []router.Route {
 			router.WithAccess(core.ACCESS_USER_ROLE),
 			router.WithSwagger(
 				router.WithSummary("Get a device"),
-				router.WithPathParam("id", "The ID of the device to get", "string"),
+				router.WithPathParam("id", "The ID of the device to get", "integer"),
 				router.WithDescription("Get a specific device from the whitelist by ID."),
 				router.WithSuccessResponse(http.StatusOK, "Device retrieved successfully", router.WithJSONContent(&dto.DeviceResponse{})),
 			),
@@ -81,7 +81,7 @@ func (a *API) setupDeviceRoutes() []router.Route {
 			router.WithAccess(core.ACCESS_USER_ROLE),
 			router.WithSwagger(
 				router.WithSummary("Delete a device"),
-				router.WithPathParam("id", "The ID of the device to delete", "string"),
+				router.WithPathParam("id", "The ID of the device to delete", "integer"),
 				router.WithDescription("Delete a device from the whitelist. This endpoint requires authentication and is idempotent."),
 				router.WithSuccessResponse(http.StatusNoContent, "Device deleted successfully"),
 			),
