@@ -16,8 +16,10 @@ import (
 	"go.lumeweb.com/liblbry/protocol"
 	"go.lumeweb.com/liblbry/server"
 	"go.lumeweb.com/liblbry/stream"
+	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
+	"go.lumeweb.com/portal-plugin-lbry/internal/protocol/util"
 	"go.lumeweb.com/portal/config"
 	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/portal/db/models"
@@ -31,10 +33,69 @@ var _ core.Protocol = (*Protocol)(nil)
 var _ core.StorageProtocol = (*Protocol)(nil)
 var _ core.ProtocolPinHandler = (*Protocol)(nil)
 
+type accessControl struct {
+	ctx           core.Context
+	deviceService pluginCore.DeviceService
+}
+
+// newAccessControl creates a new accessControl instance with proper error handling
+func newAccessControl(ctx core.Context) (*accessControl, error) {
+	logger := ctx.Logger()
+
+	// Get device service
+	deviceSvc := core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
+	if deviceSvc == nil {
+		logger.Warn("Device service not available for access control")
+		// Create a basic access control that allows all by default
+		return &accessControl{
+			ctx:           ctx,
+			deviceService: nil,
+		}, nil
+	}
+
+	return &accessControl{
+		ctx:           ctx,
+		deviceService: deviceSvc,
+	}, nil
+}
+
+func (a *accessControl) Allow(ctx context.Context, _ string, peerIP string) bool {
+	logger := a.ctx.Logger()
+
+	// If device service is not available, deny access by default
+	if a.deviceService == nil {
+		logger.Debug("Device service not available, denying access by default")
+		return false
+	}
+
+	if src, exist := protocol.GetSourceFromContext(ctx); exist {
+		if src == protocol.SourcePeer {
+			return true
+		}
+	}
+
+	// Check if device exists with this IP address
+	device, err := a.deviceService.GetDeviceByIPAddress(a.ctx.GetContext(), peerIP)
+	if err != nil {
+		logger.Error("Error checking device by IP address", zap.String("ip", peerIP), zap.Error(err))
+		return false
+	}
+
+	// If device exists, allow access
+	if device != nil {
+		logger.Debug("Allowing access for whitelisted device", zap.String("ip", peerIP), zap.Uint("device_id", device.ID))
+		return true
+	}
+
+	logger.Debug("Denying access for non-whitelisted IP", zap.String("ip", peerIP))
+	return false
+}
+
 type Protocol struct {
-	ctx  core.Context
-	db   *gorm.DB
-	node server.Server
+	ctx            core.Context
+	db             *gorm.DB
+	node           server.Server
+	reflectorStore *ReflectorStore
 }
 
 func (p Protocol) CreateProtocolPin(_ context.Context, _ uint, _ any) error {
@@ -65,6 +126,7 @@ func (p Protocol) Workflows() []core.WorkflowDefinition {
 		p.newPinWorkflow(),
 		p.newUploadWorkflow(),
 		p.newTUSUploadWorkflow(),
+		p.newReflectorAssemblyWorkflow(),
 	}
 }
 
@@ -72,6 +134,7 @@ func (p Protocol) Operations() []core.Operation {
 	return []core.Operation{
 		NewRetrieveOperation(p.ctx),
 		NewPostUploadOperation(p.ctx),
+		NewReflectorAssemblyOperation(p.ctx),
 		service.NewTUSOperationHandler(p.ctx, p, func(ctx context.Context, helper core.OperationHelper, request *models.Request, tsReq *models.TUSRequest) error {
 			// Validate request using shared utility
 			if err := ValidateRequest(request); err != nil {
@@ -86,7 +149,7 @@ func (p Protocol) Operations() []core.Operation {
 			processor := NewUploadProcessor(helper.Context())
 
 			// Cast to storage protocol with type safety
-			storageProtocol, err := CastToStorageProtocol(helper.Protocol())
+			storageProtocol, err := util.CastToStorageProtocol(helper.Protocol())
 			if err != nil {
 				return err
 			}
@@ -138,7 +201,14 @@ func NewProtocol() (core.Protocol, []core.ContextBuilderOption, error) {
 			proto.ctx = ctx
 			proto.db = ctx.DB()
 
-			node, err := buildServer(ctx)
+			// Initialize ReflectorStore
+			reflectorStore, err := NewReflectorStore(ctx)
+			if err != nil {
+				return fmt.Errorf("failed to create reflector store: %w", err)
+			}
+			proto.reflectorStore = reflectorStore
+
+			node, err := buildServer(ctx, reflectorStore)
 			if err != nil {
 				return err
 			}
@@ -170,6 +240,10 @@ func NewProtocol() (core.Protocol, []core.ContextBuilderOption, error) {
 
 func (p *Protocol) Node() server.Server {
 	return p.node
+}
+
+func (p *Protocol) ReflectorStore() *ReflectorStore {
+	return p.reflectorStore
 }
 
 func (p Protocol) newRetryStep(operation string) core.OperationStep {
@@ -207,6 +281,16 @@ func (p Protocol) newTUSUploadWorkflow() core.WorkflowDefinition {
 		Steps: append([]core.OperationStep{
 			p.newRetryStep(core.TUSUploadOperationName(p.Name())),
 		}),
+	}
+}
+
+func (p Protocol) newReflectorAssemblyWorkflow() core.WorkflowDefinition {
+	return core.WorkflowDefinition{
+		Name:                 REFLECTOR_ASSEMBLY_WORKFLOW,
+		AutoTriggerFirstStep: true,
+		Steps: []core.OperationStep{
+			p.newRetryStep(core.OperationName(internal.ProtocolName, REFLECTOR_ASSEMBLY_OPERATION)),
+		},
 	}
 }
 
@@ -317,7 +401,7 @@ func getFirstPublicIP() (string, error) {
 	return "", fmt.Errorf("no suitable public IP address found")
 }
 
-func buildServer(ctx core.Context) (server.Server, error) {
+func buildServer(ctx core.Context, reflectorStore *ReflectorStore) (server.Server, error) {
 	// Create disk storage factory using the helper from store.go
 	factory, err := liblbry.CreateStorageFactoryWithOptions[StoreFactory](WithContext(ctx))
 	if err != nil {
@@ -401,6 +485,13 @@ func buildServer(ctx core.Context) (server.Server, error) {
 		dhtOptions = append(dhtOptions, protocol.WithDHTNetworkScan(true))
 	}
 
+	// Create access control
+	accessControlInstance, err := newAccessControl(ctx)
+	if err != nil {
+		ctx.Logger().Error("Failed to create access control", zap.Error(err))
+		return nil, err
+	}
+
 	builder := server.NewServerBuilder().
 		WithStorage(store).
 		WithDHT().
@@ -413,7 +504,9 @@ func buildServer(ctx core.Context) (server.Server, error) {
 	if protoCfg != nil {
 		builder = builder.
 			WithPeer(int(protoCfg.PeerPort)).
-			WithReflector(int(protoCfg.ReflectorPort))
+			WithReflector(int(protoCfg.ReflectorPort)).
+			WithReflectorStore(reflectorStore).
+			WithAccessControl(accessControlInstance)
 	}
 
 	return builder.Build()

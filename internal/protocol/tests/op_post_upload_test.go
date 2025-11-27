@@ -10,7 +10,6 @@ import (
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	pluginDb "go.lumeweb.com/portal-plugin-lbry/internal/db"
 	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
-	pluginTesting "go.lumeweb.com/portal-plugin-lbry/internal/testing"
 	"go.lumeweb.com/portal/core"
 	coreTesting "go.lumeweb.com/portal/core/testing"
 )
@@ -35,7 +34,7 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 
 		// Create a temporary upload using the upload service
 		reqCtx := context.Background()
-		uploadCID, uploadID, err := uploadService.HandleUpload(reqCtx, pluginTesting.NewReadSeekCloser(testData))
+		uploadCID, uploadID, err := uploadService.HandleUpload(reqCtx, internal.NewReadSeekCloser(testData))
 		require.NoError(tb, err)
 		require.NotEmpty(tb, uploadID)
 		require.NotEqual(tb, cid.Undef, uploadCID)
@@ -76,6 +75,6 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 		require.NoError(tb, err)
 
 	},
-		coreTesting.CombineOptions(GetCommonTestOptions(), GetDbTestOptions()),
+		coreTesting.CombineOptions(GetCommonTestOptions()),
 	)
 }

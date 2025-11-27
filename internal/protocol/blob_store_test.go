@@ -14,7 +14,6 @@ import (
 	"go.lumeweb.com/liblbry/stream"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
-	"go.lumeweb.com/portal-plugin-lbry/internal/db/migrations"
 	coreTesting "go.lumeweb.com/portal/core/testing"
 	coreMocks "go.lumeweb.com/portal/core/testing/mocks"
 	"gorm.io/gorm"
@@ -195,11 +194,6 @@ func setupMockDeleteError(tb testing.TB, mockStorage *coreMocks.MockStorageServi
 		Return(fmt.Errorf("%s", errorMsg))
 }
 
-// Helper function for common test runner pattern
-func runBlobStoreTest(t *testing.T, testFunc func(testing.TB, coreTesting.TestContext)) {
-	coreTesting.RunTestCaseWithDB(t, testFunc, testConfig)
-}
-
 func TestLBRYBlobStore_NewLBRYBlobStore(t *testing.T) {
 	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Act
@@ -220,7 +214,7 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 		store, mockStorage := createTestStore(tb, ctx)
 
 		// Act - Test when blob doesn't exist in DB
-		has, err := store.Has(testBlobHash1)
+		has, err := store.Has(t.Context(), testBlobHash1)
 
 		// Assert
 		ast.NoError(err)
@@ -233,7 +227,7 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 		setupMockDownloadError(tb, mockStorage, testBlobHash1, "object not found")
 
 		// Act - Test when blob exists in DB but not in storage
-		has, err = store.Has(testBlobHash1)
+		has, err = store.Has(t.Context(), testBlobHash1)
 		ast.NoError(err)
 		ast.False(has)
 
@@ -244,7 +238,7 @@ func TestLBRYBlobStore_Has(t *testing.T) {
 		setupMockDownloadSuccess(tb, mockStorage, testBlobHash1, testData1)
 
 		// Act - Test when blob exists in both DB and storage
-		has, err = store.Has(testBlobHash1)
+		has, err = store.Has(t.Context(), testBlobHash1)
 		ast.NoError(err)
 		ast.True(has)
 	})
@@ -263,7 +257,7 @@ func TestLBRYBlobStore_Get(t *testing.T) {
 		setupMockDownloadSuccess(tb, mockStorage, testBlobHash1, testData1)
 
 		// Act
-		data, err := store.Get(testBlobHash1)
+		data, err := store.Get(t.Context(), testBlobHash1)
 
 		// Assert
 		ast.NoError(err)
@@ -294,7 +288,7 @@ func TestLBRYBlobStore_Get_SDBlobWithAssociatedBlobs(t *testing.T) {
 		createStreamBlobAssociation(tb, ctx, uint64(_stream.ID), uint64(blob2.ID), 1)
 
 		// Act
-		data, err := _store.Get(sdBlob.HashHex())
+		data, err := _store.Get(t.Context(), sdBlob.HashHex())
 
 		// Assert
 		ast.NoError(err)
@@ -363,7 +357,7 @@ func TestLBRYBlobStore_Get_SDBlobNoAssociatedBlobs(t *testing.T) {
 		require.NoError(tb, err)
 
 		// Act - use the correct hash that matches the blob content
-		data, err := store.Get(correctHash)
+		data, err := store.Get(t.Context(), correctHash)
 
 		// Assert
 		ast.NoError(err)
@@ -436,7 +430,7 @@ func TestLBRYBlobStore_Get_SDBlobMissingAssociatedBlobs(t *testing.T) {
 		require.NoError(tb, err)
 
 		// Act
-		data, err := store.Get(correctHash)
+		data, err := store.Get(t.Context(), correctHash)
 
 		// Assert
 		ast.NoError(err)
@@ -459,7 +453,7 @@ func TestLBRYBlobStore_Get_StreamMetadataError(t *testing.T) {
 		store.storageSvc = mockStorage
 
 		// Act
-		data, err := store.Get(testBlobHash1)
+		data, err := store.Get(t.Context(), testBlobHash1)
 
 		// Assert
 		ast.Error(err)
@@ -484,7 +478,7 @@ func TestLBRYBlobStore_Put(t *testing.T) {
 		setupMockUploadSuccess(mockStorage)
 
 		// Act
-		err = store.Put(testBlobHash1, testData)
+		err = store.Put(t.Context(), testBlobHash1, testData)
 
 		// Assert
 		ast.NoError(err)
@@ -506,7 +500,7 @@ func TestLBRYBlobStore_PutSD(t *testing.T) {
 		hash := sdBlob.HashHex()
 
 		// Act
-		err = store.PutSD(hash, testData)
+		err = store.PutSD(t.Context(), hash, testData)
 
 		// Assert
 		ast.NoError(err)
@@ -560,7 +554,7 @@ func TestLBRYBlobStore_List(t *testing.T) {
 		require.NoError(tb, err)
 
 		// Act
-		results, err := store.List(0, 10)
+		results, err := store.List(t.Context(), 0, 10)
 
 		// Assert
 		ast.NoError(err)
@@ -582,7 +576,7 @@ func TestLBRYBlobStore_Delete(t *testing.T) {
 		insertTestBlob(tb, ctx, testBlobHash2, 100, nil)
 
 		// Act
-		err := store.Delete(testBlobHash2)
+		err := store.Delete(t.Context(), testBlobHash2)
 
 		// Assert
 		ast.NoError(err)
@@ -612,7 +606,7 @@ func TestLBRYBlobStore_Get_StorageError(t *testing.T) {
 		setupMockDownloadError(tb, mockStorage, testBlobHash1, "storage connection failed")
 
 		// Act
-		data, err := store.Get(testBlobHash1)
+		data, err := store.Get(t.Context(), testBlobHash1)
 
 		// Assert
 		ast.Error(err)
@@ -640,7 +634,7 @@ func TestLBRYBlobStore_Put_StorageFailure(t *testing.T) {
 		setupMockUploadError(mockStorage, "upload failed: disk space exceeded")
 
 		// Act
-		err = store.Put(testBlobHash1, testData)
+		err = store.Put(t.Context(), testBlobHash1, testData)
 
 		// Assert
 		ast.Error(err)
@@ -667,7 +661,7 @@ func TestLBRYBlobStore_PutSD_InvalidBlobData(t *testing.T) {
 		invalidData := []byte("this is not valid SD blob data")
 
 		// Act
-		err = store.PutSD("invalid_hash", invalidData)
+		err = store.PutSD(t.Context(), "invalid_hash", invalidData)
 
 		// Assert
 		ast.Error(err)
@@ -716,7 +710,7 @@ func TestLBRYBlobStore_PutSD_WithChildBlobs(t *testing.T) {
 		hash := sdBlob.HashHex()
 
 		// Act
-		err = store.PutSD(hash, testData)
+		err = store.PutSD(t.Context(), hash, testData)
 
 		// Assert
 		ast.NoError(err)
@@ -834,7 +828,7 @@ func TestLBRYBlobStore_PutSD_WithExistingChildBlobs(t *testing.T) {
 		hash := sdBlob.HashHex()
 
 		// Act
-		err = store.PutSD(hash, testData)
+		err = store.PutSD(t.Context(), hash, testData)
 
 		// Assert
 		ast.NoError(err)
@@ -892,7 +886,7 @@ func TestLBRYBlobStore_Delete_StorageError(t *testing.T) {
 		require.NoError(tb, err)
 
 		// Act
-		err = store.Delete(testBlobHash1)
+		err = store.Delete(t.Context(), testBlobHash1)
 
 		// Assert
 		ast.Error(err)
@@ -926,7 +920,7 @@ func TestLBRYBlobStore_Put_EmptyData(t *testing.T) {
 		setupMockUploadSuccess(mockStorage)
 
 		// Act
-		err = store.Put(testBlobHash1, emptyData)
+		err = store.Put(t.Context(), testBlobHash1, emptyData)
 
 		// Assert
 		ast.NoError(err)
@@ -956,7 +950,7 @@ func TestLBRYBlobStore_Put_NilData(t *testing.T) {
 		setupMockUploadSuccess(mockStorage)
 
 		// Act
-		err = store.Put(testBlobHash1, nil)
+		err = store.Put(t.Context(), testBlobHash1, nil)
 
 		// Assert
 		ast.NoError(err)
@@ -987,7 +981,7 @@ func TestLBRYBlobStore_Get_NotInDB(t *testing.T) {
 		// Note: We don't set up any mock expectations for storage since it shouldn't be called
 
 		// Act
-		data, err := store.Get(testBlobHash1)
+		data, err := store.Get(t.Context(), testBlobHash1)
 
 		// Assert
 		ast.Error(err)
@@ -1023,7 +1017,7 @@ func TestLBRYBlobStore_Put_LargeBlob(t *testing.T) {
 		setupMockUploadSuccess(mockStorage)
 
 		// Act
-		err = store.Put(testBlobHash1, largeData)
+		err = store.Put(t.Context(), testBlobHash1, largeData)
 
 		// Assert
 		ast.NoError(err)
@@ -1062,26 +1056,26 @@ func TestLBRYBlobStore_List_PaginationEdgeCases(t *testing.T) {
 		require.NoError(tb, err)
 
 		// Test with offset beyond available records
-		results, err := store.List(10, 5)
+		results, err := store.List(t.Context(), 10, 5)
 		ast.NoError(err)
 		// Should return empty slice, not panic
 		ast.Len(results, 0)
 
 		// Test with limit 0
-		results, err = store.List(0, 0)
+		results, err = store.List(t.Context(), 0, 0)
 		ast.NoError(err)
 		// Should return empty slice, not panic
 		ast.Len(results, 0)
 
 		// Test with negative offset (should behave like offset 0)
-		results, err = store.List(-5, 5)
+		results, err = store.List(t.Context(), -5, 5)
 		ast.NoError(err)
 		// Should return first 5 items (or however many exist)
 		ast.GreaterOrEqual(len(results), 0)
 		ast.LessOrEqual(len(results), 2)
 
 		// Test with negative limit (should behave like limit 10)
-		results, err = store.List(0, -10)
+		results, err = store.List(t.Context(), 0, -10)
 		ast.NoError(err)
 		// Should return up to 10 items
 		ast.GreaterOrEqual(len(results), 0)
@@ -1106,7 +1100,7 @@ func TestLBRYBlobStore_PartialFailure_DBSuccessStorageFailure(t *testing.T) {
 		setupMockUploadError(mockStorage, "storage quota exceeded")
 
 		// Act
-		err = store.Put(testBlobHash1, testData)
+		err = store.Put(t.Context(), testBlobHash1, testData)
 
 		// Assert
 		ast.Error(err)
@@ -1260,7 +1254,7 @@ func TestLBRYBlobStore_Get_SDBlobSkipsEmptyBlobs(t *testing.T) {
 				}
 
 				// Act
-				data, err := store.Get(sdBlob.HashHex())
+				data, err := store.Get(t.Context(), sdBlob.HashHex())
 
 				// Assert
 				ast.NoError(err)
@@ -1338,7 +1332,7 @@ func TestLBRYBlobStore_BuildBlobInfosFromDb_HashDecoding(t *testing.T) {
 		require.NoError(tb, err)
 
 		// Act - call buildBlobInfosFromDb which should properly decode hex
-		blobInfos, err := store.buildBlobInfosFromDb(testStream.ID)
+		blobInfos, err := store.buildBlobInfosFromDb(t.Context(), testStream.ID)
 
 		// Assert
 		require.NoError(tb, err)
@@ -1432,7 +1426,7 @@ func TestLBRYBlobStore_BuildBlobInfosFromDb_RoundTripHashConsistency(t *testing.
 		}
 
 		// Act
-		blobInfos, err := store.buildBlobInfosFromDb(testStream.ID)
+		blobInfos, err := store.buildBlobInfosFromDb(t.Context(), testStream.ID)
 
 		// Assert
 		require.NoError(tb, err)
@@ -1463,14 +1457,3 @@ func TestLBRYBlobStore_BuildBlobInfosFromDb_RoundTripHashConsistency(t *testing.
 		}
 	})
 }
-
-var (
-	cfg        = coreTesting.NewConfigBuilder().Build()
-	testConfig = coreTesting.CombineOptions(
-		coreTesting.WithMockProtocol(internal.ProtocolName, func(protocol *coreTesting.MockProtocol) {
-			protocol.WithConfig(cfg)
-		}),
-		coreTesting.WithProtocolConfig(internal.ProtocolName, cfg),
-		coreTesting.WithSQLitePluginMigrations(internal.ProtocolName, migrations.GetSQLite()),
-	)
-)

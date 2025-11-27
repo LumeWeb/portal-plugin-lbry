@@ -12,8 +12,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tus/tusd/v2 v2.8.0
 	go.lumeweb.com/httputil v0.5.3
-	go.lumeweb.com/liblbry v0.0.0-20251125022602-7978b8f4fdf1
-	go.lumeweb.com/portal v0.4.2-0.20251118002214-4b70e6215a0b
+	go.lumeweb.com/liblbry v0.0.0-20251126033024-263ba5d8f169
+	go.lumeweb.com/portal v0.4.2-0.20251126034736-f794cd3f1982
 	go.lumeweb.com/portal-middleware v0.3.3
 	go.lumeweb.com/portal-router v0.6.8
 	go.lumeweb.com/queryutil v0.3.15
@@ -189,7 +189,7 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/crypto v0.44.0 // indirect
+	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/exp v0.0.0-20251113190631-e25ba8c21ef6 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sync v0.18.0 // indirect

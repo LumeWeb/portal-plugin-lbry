@@ -1,24 +1,8 @@
 package testing
 
 import (
-	"bytes"
-	"io"
 	"net"
 )
-
-// readSeekCloser is a test helper that implements io.ReadSeekCloser
-type readSeekCloser struct {
-	*bytes.Reader
-}
-
-func (rsc *readSeekCloser) Close() error {
-	return nil
-}
-
-// NewReadSeekCloser creates a new io.ReadSeekCloser from byte data
-func NewReadSeekCloser(data []byte) io.ReadSeekCloser {
-	return &readSeekCloser{Reader: bytes.NewReader(data)}
-}
 
 // GetFreePort asks the kernel for a free open port that is ready to use.
 func GetFreePort() (int, error) {

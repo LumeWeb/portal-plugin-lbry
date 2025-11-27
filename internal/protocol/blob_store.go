@@ -51,9 +51,9 @@ func NewLBRYBlobStore(ctx core.Context) (*BlobStore, error) {
 }
 
 // Has checks if a blob with the given hash exists in storage
-func (bs *BlobStore) Has(hash string) (bool, error) {
+func (bs *BlobStore) Has(ctx context.Context, hash string) (bool, error) {
 	// First check if we have metadata in our database
-	count, err := bs.hasBlobMetadata(hash)
+	count, err := bs.hasBlobMetadata(ctx, hash)
 	if err != nil {
 		return false, err
 	}
@@ -67,7 +67,7 @@ func (bs *BlobStore) Has(hash string) (bool, error) {
 		}
 
 		// Try to download the object to verify it exists
-		reader, err := bs.storageSvc.DownloadObject(context.Background(), bs.proto, storageHash, 0)
+		reader, err := bs.storageSvc.DownloadObject(ctx, bs.proto, storageHash, 0)
 		if err != nil {
 			// Object doesn't exist in storage, but metadata exists
 			// This could happen if there was a partial upload
@@ -88,9 +88,9 @@ func (bs *BlobStore) Has(hash string) (bool, error) {
 }
 
 // Get retrieves a blob by its hash
-func (bs *BlobStore) Get(hash string) ([]byte, error) {
+func (bs *BlobStore) Get(ctx context.Context, hash string) ([]byte, error) {
 	// Check if this is an SD blob (stream metadata)
-	isSdBlob, streamData, err := bs.isSDBlob(hash)
+	isSdBlob, streamData, err := bs.isSDBlob(ctx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -100,18 +100,18 @@ func (bs *BlobStore) Get(hash string) ([]byte, error) {
 	}
 
 	// Not an SD blob, proceed with regular blob logic
-	return bs.getRegularBlob(hash)
+	return bs.getRegularBlob(ctx, hash)
 }
 
 // isSDBlob checks if a given hash corresponds to an SD blob (stream metadata)
 // Returns a boolean indicating whether it's an SD blob, and the stream data if it is
-func (bs *BlobStore) isSDBlob(hash string) (bool, []byte, error) {
+func (bs *BlobStore) isSDBlob(ctx context.Context, hash string) (bool, []byte, error) {
 	// Check if this is an SD blob (stream metadata)
 	var _stream pluginDb.Stream
-	err := bs.db.Where("sd_hash = ?", hash).First(&_stream).Error
+	err := bs.db.WithContext(ctx).Where("sd_hash = ?", hash).First(&_stream).Error
 	if err == nil {
 		// This is an SD blob, reconstruct it
-		data, err := bs.getSDBlob(&_stream, hash)
+		data, err := bs.getSDBlob(ctx, &_stream, hash)
 		if err != nil {
 			return true, nil, err
 		}
@@ -125,7 +125,7 @@ func (bs *BlobStore) isSDBlob(hash string) (bool, []byte, error) {
 }
 
 // getSDBlob handles SD blob retrieval with associated blobs
-func (bs *BlobStore) getSDBlob(_stream *pluginDb.Stream, hash string) ([]byte, error) {
+func (bs *BlobStore) getSDBlob(ctx context.Context, _stream *pluginDb.Stream, hash string) ([]byte, error) {
 	// Build the SDBlob structure
 	streamHashBytes, err := hex.DecodeString(_stream.StreamHash)
 	if err != nil {
@@ -141,7 +141,7 @@ func (bs *BlobStore) getSDBlob(_stream *pluginDb.Stream, hash string) ([]byte, e
 	}
 
 	// Use shared utility to build blob infos from database
-	blobInfos, err := bs.buildBlobInfosFromDb(_stream.ID)
+	blobInfos, err := bs.buildBlobInfosFromDb(ctx, _stream.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get associated blobs for SD stream %q: %w", hash, err)
 	}
@@ -163,9 +163,9 @@ func (bs *BlobStore) getSDBlob(_stream *pluginDb.Stream, hash string) ([]byte, e
 }
 
 // getRegularBlob handles regular blob retrieval
-func (bs *BlobStore) getRegularBlob(hash string) ([]byte, error) {
+func (bs *BlobStore) getRegularBlob(ctx context.Context, hash string) ([]byte, error) {
 	// First check if we have metadata in our database
-	count, err := bs.hasBlobMetadata(hash)
+	count, err := bs.hasBlobMetadata(ctx, hash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check blob existence in database for blob %q: %w", hash, err)
 	}
@@ -182,7 +182,7 @@ func (bs *BlobStore) getRegularBlob(hash string) ([]byte, error) {
 	}
 
 	// Try to download the blob data from storage
-	rc, err := bs.storageSvc.DownloadObject(context.Background(), bs.proto, storageHash, 0)
+	rc, err := bs.storageSvc.DownloadObject(ctx, bs.proto, storageHash, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download blob %q: %w", hash, err)
 	}
@@ -204,14 +204,14 @@ func (bs *BlobStore) getRegularBlob(hash string) ([]byte, error) {
 }
 
 // hasBlobMetadata checks if blob metadata exists in the database
-func (bs *BlobStore) hasBlobMetadata(hash string) (int64, error) {
+func (bs *BlobStore) hasBlobMetadata(ctx context.Context, hash string) (int64, error) {
 	var count int64
-	err := bs.db.Model(&pluginDb.Blob{}).Where("blob_hash = ?", hash).Count(&count).Error
+	err := bs.db.WithContext(ctx).Model(&pluginDb.Blob{}).Where("blob_hash = ?", hash).Count(&count).Error
 	return count, err
 }
 
 // Put stores a blob with the given hash and data
-func (bs *BlobStore) Put(hash string, data []byte) error {
+func (bs *BlobStore) Put(ctx context.Context, hash string, data []byte) error {
 	// Convert the hash using stream.ToMultihash
 	sh, err := internal.LBRYHashToStorageHash(hash)
 	if err != nil {
@@ -219,7 +219,7 @@ func (bs *BlobStore) Put(hash string, data []byte) error {
 	}
 
 	// Store the blob data using the storage service
-	_, err = bs.storageSvc.UploadObject(context.Background(), service.NewStorageUploadRequest(
+	_, err = bs.storageSvc.UploadObject(ctx, service.NewStorageUploadRequest(
 		core.StorageUploadWithProtocol(bs.proto),
 		core.StorageUploadWithData(bytes.NewReader(data)),
 		core.StorageUploadWithSize(uint64(len(data))),
@@ -235,7 +235,7 @@ func (bs *BlobStore) Put(hash string, data []byte) error {
 		BlobSize: len(data),
 	}
 
-	return bs.db.Clauses(clause.OnConflict{
+	return bs.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "blob_hash"}},
 		DoUpdates: clause.Set{
 			{Column: clause.Column{Name: "blob_size"}, Value: _blob.BlobSize},
@@ -244,8 +244,8 @@ func (bs *BlobStore) Put(hash string, data []byte) error {
 }
 
 // processStreamBlobs handles the creation/update of stream blob associations
-func (bs *BlobStore) processStreamBlobs(streamID uint, blobInfos []stream.BlobInfo) error {
-	return bs.db.Transaction(func(tx *gorm.DB) error {
+func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blobInfos []stream.BlobInfo) error {
+	return bs.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Process each blob in the stream
 		for _, blobInfo := range blobInfos {
 			// Convert blob hash bytes to string
@@ -300,10 +300,10 @@ func (bs *BlobStore) processStreamBlobs(streamID uint, blobInfos []stream.BlobIn
 }
 
 // buildBlobInfosFromDb retrieves and builds blob information from the database
-func (bs *BlobStore) buildBlobInfosFromDb(streamID uint) ([]stream.BlobInfo, error) {
+func (bs *BlobStore) buildBlobInfosFromDb(ctx context.Context, streamID uint) ([]stream.BlobInfo, error) {
 	// Get associated blobs for this stream
 	var streamBlobs []pluginDb.StreamBlob
-	err := bs.db.Where("stream_id = ?", uint64(streamID)).Order("blob_number").Find(&streamBlobs).Error
+	err := bs.db.WithContext(ctx).Where("stream_id = ?", uint64(streamID)).Order("blob_number").Find(&streamBlobs).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get associated blobs for stream %d: %w", streamID, err)
 	}
@@ -322,7 +322,7 @@ func (bs *BlobStore) buildBlobInfosFromDb(streamID uint) ([]stream.BlobInfo, err
 	for _, streamBlob := range streamBlobs {
 		// Get the blob details
 		var blob pluginDb.Blob
-		err = bs.db.Where("id = ?", streamBlob.BlobID).First(&blob).Error
+		err = bs.db.WithContext(ctx).Where("id = ?", streamBlob.BlobID).First(&blob).Error
 		if err != nil {
 			// For missing blobs, create a placeholder blob info with empty data
 			// This allows SD blob serialization to continue even with missing associated blobs
@@ -411,7 +411,7 @@ func (bs *BlobStore) buildBlobInfosFromDb(streamID uint) ([]stream.BlobInfo, err
 
 // PutSD stores an SD blob as a stream in the database
 // SD blobs contain stream metadata and should be treated as streams, not regular blobs
-func (bs *BlobStore) PutSD(hash string, data []byte) error {
+func (bs *BlobStore) PutSD(ctx context.Context, hash string, data []byte) error {
 	// Parse the SD blob data using the liblbry stream package
 	sdBlob := stream.SDBlob{}
 
@@ -432,7 +432,7 @@ func (bs *BlobStore) PutSD(hash string, data []byte) error {
 	}
 
 	// Use GORM's upsert functionality to handle both creation and updates
-	err := bs.db.Clauses(clause.OnConflict{
+	err := bs.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "stream_hash"}},
 		DoUpdates: clause.Set{
 			{Column: clause.Column{Name: "stream_name"}, Value: _stream.StreamName},
@@ -449,14 +449,14 @@ func (bs *BlobStore) PutSD(hash string, data []byte) error {
 	// After upsert, retrieve the actual stream ID from the database
 	// The in-memory _stream.ID may be unset or stale after OnConflict().Create()
 	var actualStream pluginDb.Stream
-	err = bs.db.First(&actualStream, "stream_hash = ?", _stream.StreamHash).Error
+	err = bs.db.WithContext(ctx).First(&actualStream, "stream_hash = ?", _stream.StreamHash).Error
 	if err != nil {
 		return fmt.Errorf("failed to retrieve stream after upsert: %w", err)
 	}
 
 	// Process child blobs using the shared utility
 	if len(sdBlob.BlobInfos) > 0 {
-		err = bs.processStreamBlobs(actualStream.ID, sdBlob.BlobInfos)
+		err = bs.processStreamBlobs(ctx, actualStream.ID, sdBlob.BlobInfos)
 		if err != nil {
 			return fmt.Errorf("failed to process stream blobs: %w", err)
 		}
@@ -471,12 +471,12 @@ func (bs *BlobStore) Name() string {
 }
 
 // List returns a paginated list of blob hashes from streams
-func (bs *BlobStore) List(offset, limit int) ([]string, error) {
+func (bs *BlobStore) List(ctx context.Context, offset, limit int) ([]string, error) {
 	// Create subquery for regular blobs only
-	blobQuery := bs.db.Table("lbry_blobs").Select("blob_hash as hash")
+	blobQuery := bs.db.WithContext(ctx).Table("lbry_blobs").Select("blob_hash as hash")
 
 	// Combine queries using UNION ALL
-	unionQuery := bs.db.Table("(? UNION ALL ?) as combined", blobQuery, bs.db.Table("lbry_streams").Select("sd_hash as hash")).
+	unionQuery := bs.db.WithContext(ctx).Table("(? UNION ALL ?) as combined", blobQuery, bs.db.WithContext(ctx).Table("lbry_streams").Select("sd_hash as hash")).
 		Order("hash").
 		Offset(offset).
 		Limit(limit)
@@ -494,7 +494,7 @@ func (bs *BlobStore) List(offset, limit int) ([]string, error) {
 }
 
 // Delete removes a blob by its hash
-func (bs *BlobStore) Delete(hash string) error {
+func (bs *BlobStore) Delete(ctx context.Context, hash string) error {
 	// Parse the storage hash
 	storageHash, err := internal.LBRYHashToStorageHash(hash)
 	if err != nil {
@@ -502,13 +502,13 @@ func (bs *BlobStore) Delete(hash string) error {
 	}
 
 	// Delete the blob data from storage
-	err = bs.storageSvc.DeleteObject(context.Background(), bs.proto, storageHash)
+	err = bs.storageSvc.DeleteObject(ctx, bs.proto, storageHash)
 	if err != nil {
 		return fmt.Errorf("failed to delete blob from storage: %w", err)
 	}
 
 	// Delete the blob metadata from the database
-	err = bs.db.Where("blob_hash = ?", hash).Delete(&pluginDb.Blob{}).Error
+	err = bs.db.WithContext(ctx).Where("blob_hash = ?", hash).Delete(&pluginDb.Blob{}).Error
 	if err != nil {
 		return fmt.Errorf("failed to delete blob metadata: %w", err)
 	}
