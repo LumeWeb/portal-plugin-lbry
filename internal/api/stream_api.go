@@ -58,8 +58,7 @@ func (a *API) setupStreamRoutes() []router.Route {
 				router.WithSummary("List streams"),
 				router.WithDescription("List all streams for the authenticated user with pagination, filtering, and sorting support."),
 				router.WithSchema(streamSchema),
-				router.WithFilterParamsFromSchema(streamSchema),
-				router.WithSuccessResponse(http.StatusOK, "Streams retrieved successfully", router.WithJSONContent(&queryutil.Response[[]*dto.StreamResponse]{})),
+				router.WithSuccessResponse(http.StatusOK, "Streams retrieved successfully", router.WithJSONContent(&queryutil.Response[*dto.StreamResponse]{})),
 			),
 		),
 		router.NewRoute(
@@ -69,6 +68,7 @@ func (a *API) setupStreamRoutes() []router.Route {
 			router.WithAccess(core.ACCESS_USER_ROLE),
 			router.WithSwagger(
 				router.WithSummary("Delete a stream"),
+				router.WithPathParam("sd_hash", "The SD hash of the stream to delete", "string"),
 				router.WithDescription("Delete a stream and all associated data. Only streams owned by the authenticated user can be deleted."),
 				router.WithSuccessResponse(http.StatusNoContent, "Stream deleted successfully"),
 			),
