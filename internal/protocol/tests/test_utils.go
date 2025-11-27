@@ -176,15 +176,18 @@ func createTestBlobAcquirer(ctx coreTesting.TestContext) (client.StreamAcquirer,
 		return nil, fmt.Errorf("failed to create DHT node: %w", err)
 	}
 
+	protoCfg := core.GetProtocolConfig[*pluginConfig.ProtocolConfig](ctx, internal.ProtocolName)
+
 	// Create peer transfer with DHT discovery using DefaultPeerClientFactory
-	// Use the same DHT port for fixed peers to ensure connectivity
+	// Use the peer port for fixed peers to ensure proper connectivity
+	peerAddress := net.JoinHostPort("127.0.0.1", fmt.Sprintf("%d", protoCfg.PeerPort))
 	peerTransfer, err := peer_transfer.NewPeerTransfer(
 		dhtNode,
 		protocol.DefaultPeerClientFactory(),
 		peer_transfer.WithPeerTransferLogger(logger),
 		peer_transfer.WithPeerTransferTimeout(30*time.Second),
 		peer_transfer.WithPeerTransferMaxPeers(5),
-		peer_transfer.WithPeerTransferFixedPeers([]string{dhtAddress}),
+		peer_transfer.WithPeerTransferFixedPeers([]string{peerAddress}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create peer transfer: %w", err)
