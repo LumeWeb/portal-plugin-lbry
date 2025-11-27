@@ -478,6 +478,12 @@ func buildServer(ctx core.Context, reflectorStore *ReflectorStore) (server.Serve
 		dhtOptions = append(dhtOptions, protocol.WithDHTNetworkScan(true))
 	}
 
+	// Add DHT node ID if configured
+	if protoCfg != nil && protoCfg.DHTNodeID != "" {
+		ctx.Logger().Info("Using configured DHT node ID", zap.String("node_id", protoCfg.DHTNodeID))
+		dhtOptions = append(dhtOptions, protocol.WithDHTNodeID(protoCfg.DHTNodeID))
+	}
+
 	builder := server.NewServerBuilder().
 		WithStorage(store).
 		WithDHT().
