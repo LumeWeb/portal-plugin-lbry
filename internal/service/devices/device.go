@@ -106,7 +106,7 @@ func (s *DeviceServiceDefault) UpdateDevice(ctx context.Context, userID, id uint
 	err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("device not found")
+			return nil, err
 		}
 		return nil, fmt.Errorf("failed to find device: %w", err)
 	}
@@ -151,7 +151,7 @@ func (s *DeviceServiceDefault) UpdateDeviceName(ctx context.Context, userID, id 
 	err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("device not found")
+			return nil, err
 		}
 		return nil, fmt.Errorf("failed to find device: %w", err)
 	}
@@ -234,7 +234,7 @@ func (s *DeviceServiceDefault) DeleteDevice(ctx context.Context, userID, id uint
 
 	// Check if device belongs to the user
 	if device.UserID != userID {
-		return fmt.Errorf("device not found")
+		return gorm.ErrRecordNotFound
 	}
 
 	// Delete device (soft delete)
@@ -251,12 +251,12 @@ func (s *DeviceServiceDefault) DeleteDevice(ctx context.Context, userID, id uint
 }
 
 // GetDeviceByIPAddress retrieves a device by IP address
-func (s *DeviceServiceDefault) GetDeviceByIPAddress(ctx context.Context, userID uint, ipAddress string) (*db.Device, error) {
+func (s *DeviceServiceDefault) GetDeviceByIPAddress(ctx context.Context, ipAddress string) (*db.Device, error) {
 	var device db.Device
-	err := s.db.WithContext(ctx).Where("ip_address = ? AND user_id = ?", ipAddress, userID).First(&device).Error
+	err := s.db.WithContext(ctx).Where("ip_address = ?", ipAddress).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("device not found")
+			return nil, err
 		}
 		return nil, fmt.Errorf("failed to get device by IP address: %w", err)
 	}

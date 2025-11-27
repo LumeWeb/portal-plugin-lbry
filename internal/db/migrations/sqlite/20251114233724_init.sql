@@ -60,10 +60,60 @@ CREATE TABLE IF NOT EXISTS lbry_devices (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lbry_devices_user_id ON lbry_devices(user_id);
+
+CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blob_hash TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    device_id INTEGER,
+    stream_id INTEGER,
+    blob_size INTEGER,
+    blob_number INTEGER NOT NULL DEFAULT 0,
+    received BOOLEAN NOT NULL DEFAULT FALSE,
+    iv_data BLOB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL,
+    
+    UNIQUE(user_id, blob_hash),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (device_id) REFERENCES lbry_devices(id),
+    FOREIGN KEY (stream_id) REFERENCES lbry_pending_streams(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_user_id ON lbry_pending_blobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_device_id ON lbry_pending_blobs(device_id);
+CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_stream_id ON lbry_pending_blobs(stream_id);
+
+CREATE TABLE IF NOT EXISTS lbry_pending_streams (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stream_hash TEXT NOT NULL,
+    sd_hash TEXT NOT NULL,
+    stream_name TEXT,
+    stream_type TEXT DEFAULT 'lbryfile',
+    suggested_file_name TEXT,
+    key_data BLOB,
+    user_id INTEGER NOT NULL,
+    device_id INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (device_id) REFERENCES lbry_devices(id),
+    UNIQUE(user_id, stream_hash),
+    UNIQUE(user_id, sd_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lbry_pending_streams_user_id ON lbry_pending_streams(user_id);
+CREATE INDEX IF NOT EXISTS idx_lbry_pending_streams_device_id ON lbry_pending_streams(device_id);
+CREATE INDEX IF NOT EXISTS idx_lbry_pending_streams_sd_hash ON lbry_pending_streams(sd_hash);
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
+DROP TABLE IF EXISTS lbry_pending_blobs;
+DROP TABLE IF EXISTS lbry_pending_streams;
 DROP TABLE IF EXISTS lbry_stream_pins;
 DROP TABLE IF EXISTS lbry_stream_blobs;
 DROP TABLE IF EXISTS lbry_blobs;

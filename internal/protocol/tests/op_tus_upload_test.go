@@ -13,7 +13,6 @@ import (
 	"github.com/tus/tusd/v2/pkg/handler"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
-	pluginTesting "go.lumeweb.com/portal-plugin-lbry/internal/testing"
 	"go.lumeweb.com/portal/core"
 	coreTesting "go.lumeweb.com/portal/core/testing"
 )
@@ -51,7 +50,7 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 		// Create a temporary upload to get the hash using the upload service
 		reqCtx := context.Background()
 		uploadSvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
-		uploadCID, tempUploadID, err := uploadSvc.HandleUpload(reqCtx, pluginTesting.NewReadSeekCloser(testData))
+		uploadCID, tempUploadID, err := uploadSvc.HandleUpload(reqCtx, internal.NewReadSeekCloser(testData))
 		require.NoError(tb, err)
 		require.NotEmpty(tb, tempUploadID)
 
@@ -95,7 +94,7 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 		// Upload the actual file data
 		err = storageSvc.S3MultipartUpload(
 			ctx,
-			pluginTesting.NewReadSeekCloser(testData),
+			internal.NewReadSeekCloser(testData),
 			ctx.Config().Config().Core.Storage.S3.BufferBucket,
 			storageSvc.GetTemporaryUploadPath(proto.(core.StorageProtocol), objectId),
 			uint64(len(testData)),
@@ -122,7 +121,7 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 		wfTest.AssertOperationStatusMessageContains(req, "Successfully completed")
 		wfTest.AssertOperationStatusProgress(req, 100)
 	},
-		coreTesting.CombineOptions(GetTUSUploadTestOptions()),
+		GetIntegrationTestOptions()...,
 	)
 }
 

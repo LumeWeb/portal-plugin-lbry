@@ -69,7 +69,7 @@ func (h *RetrieveOperationHandler) Execute(ctx context.Context, req *models.Requ
 		return fmt.Errorf("failed to convert SDBlob to blob: %w", err)
 	}
 
-	err = blobManager.AddSDBlob(blob.SDBlobHash, sdBlobBytes)
+	err = blobManager.AddSDBlob(ctx, blob.SDBlobHash, sdBlobBytes)
 	if err != nil {
 		return fmt.Errorf("failed to add SDBlob to blob manager: %w", err)
 	}
@@ -78,7 +78,7 @@ func (h *RetrieveOperationHandler) Execute(ctx context.Context, req *models.Requ
 		zap.String("sd_hash", blob.SDBlobHash))
 
 	// Process the stream result using shared utility
-	err = ProcessStreamResult(ctx, h.Context(), blob, blob.SDBlobHash, *req.UserID)
+	err = ProcessStreamResult(ctx, h.Context(), blob, *req.UserID)
 	if err != nil {
 		return err
 	}

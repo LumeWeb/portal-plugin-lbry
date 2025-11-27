@@ -31,7 +31,7 @@ type DeviceService interface {
 	DeleteDevice(ctx context.Context, userID, id uint) error
 
 	// GetDeviceByIPAddress retrieves a device by IP address
-	GetDeviceByIPAddress(ctx context.Context, userID uint, ipAddress string) (*db.Device, error)
+	GetDeviceByIPAddress(ctx context.Context, ipAddress string) (*db.Device, error)
 }
 
 // Device service name

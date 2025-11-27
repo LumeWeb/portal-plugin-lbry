@@ -8,6 +8,7 @@ import (
 	"go.lumeweb.com/liblbry/stream"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
+	"go.lumeweb.com/portal-plugin-lbry/internal/protocol/util"
 	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/portal/db/models"
 )
@@ -37,21 +38,6 @@ func CastToProtocol(proto core.Protocol) (*Protocol, error) {
 	return protocol, nil
 }
 
-// CastToStorageProtocol casts a protocol interface to core.StorageProtocol with type safety
-// This function handles the type assertion and validation for storage operations
-func CastToStorageProtocol(proto core.Protocol) (core.StorageProtocol, error) {
-	if proto == nil {
-		return nil, fmt.Errorf("protocol interface cannot be nil")
-	}
-
-	storageProtocol, ok := proto.(core.StorageProtocol)
-	if !ok {
-		return nil, fmt.Errorf("protocol %q does not implement core.StorageProtocol", internal.ProtocolName)
-	}
-
-	return storageProtocol, nil
-}
-
 // GetStorageProtocol retrieves and validates the LBRY protocol as core.StorageProtocol
 // This function wraps GetProtocolInterface and CastToStorageProtocol for convenience
 func GetStorageProtocol() (core.StorageProtocol, error) {
@@ -60,7 +46,7 @@ func GetStorageProtocol() (core.StorageProtocol, error) {
 		return nil, err
 	}
 
-	return CastToStorageProtocol(protocolInterface)
+	return util.CastToStorageProtocol(protocolInterface)
 }
 
 // GetProtocol retrieves and validates the LBRY protocol with type safety
@@ -144,7 +130,8 @@ func GetStorageService(coreCtx core.Context) (core.StorageService, error) {
 }
 
 // ProcessStreamResult handles the common stream processing logic for both upload and retrieve operations
-func ProcessStreamResult(ctx context.Context, coreCtx core.Context, streamResult *stream.StreamResult, lbryHash string, userID uint) error {
+func ProcessStreamResult(ctx context.Context, coreCtx core.Context, streamResult *stream.StreamResult, userID uint) error {
+	lbryHash := streamResult.SDBlob.HashHex()
 	// Get upload service
 	uploadSvc := core.GetService[pluginCore.UploadService](coreCtx, pluginCore.UPLOAD_SERVICE)
 	if uploadSvc == nil {

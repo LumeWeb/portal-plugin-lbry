@@ -55,6 +55,6 @@ func TestRetrieveOperationHandler_Execute_Integration(t *testing.T) {
 
 	},
 		coreTesting.CombineOptions(
-			GetCommonTestOptions(), GetDbTestOptions()),
+			GetCommonTestOptions()),
 	)
 }

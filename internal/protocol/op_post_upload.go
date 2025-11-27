@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"go.lumeweb.com/portal-plugin-lbry/internal"
+	"go.lumeweb.com/portal-plugin-lbry/internal/protocol/util"
 	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/portal/db/models"
 )
@@ -35,7 +36,7 @@ func (h *PostUploadOperationHandler) Execute(ctx context.Context, req *models.Re
 	processor := NewUploadProcessor(h.Context())
 
 	// Cast to storage protocol with type safety
-	storageProtocol, err := CastToStorageProtocol(h.Protocol())
+	storageProtocol, err := util.CastToStorageProtocol(h.Protocol())
 	if err != nil {
 		return err
 	}
@@ -80,7 +81,7 @@ func (h *PostUploadOperationHandler) Cleanup(ctx context.Context, req *models.Re
 	}
 
 	// Cast to storage protocol with type safety
-	storageProtocol, err := CastToStorageProtocol(h.Protocol())
+	storageProtocol, err := util.CastToStorageProtocol(h.Protocol())
 	if err != nil {
 		return err
 	}

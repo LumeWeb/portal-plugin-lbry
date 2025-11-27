@@ -2,6 +2,7 @@ package upload
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,12 +13,13 @@ import (
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
-	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
+	"go.lumeweb.com/portal-plugin-lbry/internal/protocol/util"
 	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/portal/db/models"
 	"go.lumeweb.com/queryutil"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UploadServiceDefault implements the UploadServiceDefault interface for LBRY protocol
@@ -106,7 +108,7 @@ func (s *UploadServiceDefault) HandleUpload(ctx context.Context, reader io.ReadS
 	}
 
 	// Cast to storage protocol with type safety
-	storageProtocol, err := protocol.CastToStorageProtocol(s.protocol)
+	storageProtocol, err := util.CastToStorageProtocol(s.protocol)
 	if err != nil {
 		s.logger.Error("Failed to cast protocol to storage protocol", zap.Error(err))
 		return cid.Undef, "", fmt.Errorf("failed to cast protocol to storage protocol: %w", err)
@@ -128,6 +130,12 @@ func (s *UploadServiceDefault) ProcessUpload(ctx context.Context, streamResult *
 	}
 
 	for index, c := range streamResult.ContentHashes {
+		if c == "" {
+			s.logger.Debug("Skipping terminating/empty blob",
+				zap.String("sd_blob_hash", streamResult.SDBlobHash))
+			continue
+		}
+
 		_cid, err := internal.LBRYHashToCID(c)
 		if err != nil {
 			return err
@@ -168,6 +176,225 @@ func (s *UploadServiceDefault) ProcessUpload(ctx context.Context, streamResult *
 		zap.Uint("userID", userId),
 		zap.Int("cidCount", len(streamResult.ContentHashes)),
 	)
+
+	return nil
+}
+
+// StorePendingBlob stores a regular blob in pending state
+func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfo *stream.BlobInfo) error {
+	pendingBlob := db.PendingBlob{
+		BlobHash:   hex.EncodeToString(blobInfo.BlobHash),
+		UserID:     userID,
+		DeviceID:   deviceID,
+		StreamID:   streamID,
+		BlobSize:   int(blobInfo.Length),
+		BlobNumber: blobInfo.BlobNum,
+		Received:   true, // Mark as received when storing
+		IVData:     blobInfo.IV,
+	}
+
+	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}},
+		DoUpdates: clause.Set{
+			{Column: clause.Column{Name: "device_id"}, Value: pendingBlob.DeviceID},
+			{Column: clause.Column{Name: "stream_id"}, Value: pendingBlob.StreamID},
+			{Column: clause.Column{Name: "blob_size"}, Value: pendingBlob.BlobSize},
+			{Column: clause.Column{Name: "blob_number"}, Value: pendingBlob.BlobNumber},
+			{Column: clause.Column{Name: "received"}, Value: pendingBlob.Received},
+			{Column: clause.Column{Name: "iv_data"}, Value: pendingBlob.IVData},
+		},
+	}).Create(&pendingBlob).Error
+
+	if err != nil {
+		s.logger.Error("Failed to create pending blob record",
+			zap.Uint("user_id", userID),
+			zap.String("blob_hash", hex.EncodeToString(blobInfo.BlobHash)),
+			zap.Error(err))
+		return fmt.Errorf("failed to create pending blob record: %w", err)
+	}
+
+	return nil
+}
+
+// StorePendingStream stores an SD blob with full stream metadata in pending state
+func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, deviceID uint, sdBlob *stream.SDBlob, sdHash string) (uint, error) {
+	// Validate input parameters
+	if sdBlob == nil {
+		return 0, fmt.Errorf("sdBlob cannot be nil")
+	}
+	if sdHash == "" {
+		return 0, fmt.Errorf("sdHash cannot be empty")
+	}
+
+	// Convert stream hash bytes to string
+	streamHash := hex.EncodeToString(sdBlob.StreamHash)
+
+	pendingStream := db.PendingStream{
+		StreamHash:        streamHash,
+		SDHash:            sdHash,
+		StreamName:        sdBlob.StreamName,
+		StreamType:        sdBlob.StreamType,
+		SuggestedFileName: sdBlob.SuggestedFileName,
+		KeyData:           sdBlob.Key,
+		UserID:            userID,
+		DeviceID:          deviceID,
+	}
+
+	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "sd_hash"}},
+		DoUpdates: clause.Set{
+			{Column: clause.Column{Name: "stream_hash"}, Value: pendingStream.StreamHash},
+			{Column: clause.Column{Name: "stream_name"}, Value: pendingStream.StreamName},
+			{Column: clause.Column{Name: "stream_type"}, Value: pendingStream.StreamType},
+			{Column: clause.Column{Name: "suggested_file_name"}, Value: pendingStream.SuggestedFileName},
+			{Column: clause.Column{Name: "key_data"}, Value: pendingStream.KeyData},
+			{Column: clause.Column{Name: "device_id"}, Value: pendingStream.DeviceID},
+			{Column: clause.Column{Name: "user_id"}, Value: pendingStream.UserID},
+		},
+	}).Create(&pendingStream).Error
+
+	if err != nil {
+		s.logger.Error("Failed to create pending stream record",
+			zap.Uint("user_id", userID),
+			zap.String("sd_hash", sdHash),
+			zap.Error(err))
+		return 0, fmt.Errorf("failed to create pending stream record: %w", err)
+	}
+
+	// Auto-create empty pending records for all child blobs referenced in the SD blob
+	if len(sdBlob.BlobInfos) > 0 {
+		err = s.createPendingBlobsFromSDBlob(ctx, userID, deviceID, pendingStream.ID, sdBlob.BlobInfos)
+		if err != nil {
+			s.logger.Error("Failed to create pending blob records from SD blob",
+				zap.Uint("user_id", userID),
+				zap.String("sd_hash", sdHash),
+				zap.Error(err))
+			return 0, fmt.Errorf("failed to create pending blob records from SD blob: %w", err)
+		}
+
+		s.logger.Debug("SD blob and child pending blobs created successfully",
+			zap.Uint("user_id", userID),
+			zap.String("sd_hash", sdHash),
+			zap.Int("child_blob_count", len(sdBlob.BlobInfos)))
+	} else {
+		s.logger.Debug("SD blob stored successfully (no child blobs)",
+			zap.Uint("user_id", userID),
+			zap.String("sd_hash", sdHash))
+	}
+
+	return pendingStream.ID, nil
+}
+
+// createPendingBlobsFromSDBlob creates pending blob records from SD blob child blob information
+func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfos []stream.BlobInfo) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, blobInfo := range blobInfos {
+			// Create pending blob record with Received=false to indicate it's waiting for upload
+			pendingBlob := db.PendingBlob{
+				BlobHash:   hex.EncodeToString(blobInfo.BlobHash),
+				UserID:     userID,
+				DeviceID:   deviceID,
+				StreamID:   streamID,
+				BlobSize:   int(blobInfo.Length),
+				BlobNumber: blobInfo.BlobNum,
+				Received:   false, // Mark as not received yet - waiting for upload
+				IVData:     blobInfo.IV,
+			}
+
+			err := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}},
+				DoUpdates: clause.Set{
+					{Column: clause.Column{Name: "device_id"}, Value: pendingBlob.DeviceID},
+					{Column: clause.Column{Name: "stream_id"}, Value: pendingBlob.StreamID},
+					{Column: clause.Column{Name: "blob_size"}, Value: pendingBlob.BlobSize},
+					{Column: clause.Column{Name: "blob_number"}, Value: pendingBlob.BlobNumber},
+					{Column: clause.Column{Name: "received"}, Value: pendingBlob.Received},
+					{Column: clause.Column{Name: "iv_data"}, Value: pendingBlob.IVData},
+				},
+			}).Create(&pendingBlob).Error
+
+			if err != nil {
+				return fmt.Errorf("failed to create pending blob record for %s: %w", hex.EncodeToString(blobInfo.BlobHash), err)
+			}
+		}
+		return nil
+	})
+}
+
+// GetMissingBlobs checks which required blobs are not available
+func (s *UploadServiceDefault) GetMissingBlobs(ctx context.Context, userID uint, streamID uint, requiredBlobs []string) ([]string, error) {
+	var availableBlobs []string
+
+	// Check regular pending blobs for this specific stream only
+	err := s.db.WithContext(ctx).Model(&db.PendingBlob{}).
+		Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, streamID, requiredBlobs).
+		Pluck("blob_hash", &availableBlobs).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Create set of available blobs
+	availableSet := make(map[string]bool)
+	for _, hash := range availableBlobs {
+		availableSet[hash] = true
+	}
+
+	var missing []string
+	for _, hash := range requiredBlobs {
+		if !availableSet[hash] {
+			missing = append(missing, hash)
+		}
+	}
+
+	return missing, nil
+}
+
+// CleanupPendingBlobs removes pending blob records after successful assembly
+func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID uint, streamResult *stream.StreamResult) error {
+	// First, find the pending stream by SD hash and user ID to get the stream ID
+	var pendingStream db.PendingStream
+	findErr := s.db.WithContext(ctx).
+		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
+		First(&pendingStream).Error
+	if findErr != nil {
+		// If the pending stream is not found, continue with cleanup (no error)
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			// Continue with cleanup of pending streams by SD hash
+		} else {
+			// Return error for other database issues
+			return fmt.Errorf("failed to find pending stream: %w", findErr)
+		}
+	}
+
+	// Clean up regular pending blobs associated with this specific stream
+	// Only do this if we found a pending stream
+	if findErr == nil {
+		// If ContentBlobs is empty, don't delete any pending blobs
+		if len(streamResult.ContentBlobs) > 0 {
+			// Convert ContentBlobs to hex strings for comparison
+			contentBlobHashes := make([]string, len(streamResult.ContentBlobs))
+			for i, contentBlob := range streamResult.ContentBlobs {
+				contentBlobHashes[i] = hex.EncodeToString(contentBlob)
+			}
+
+			err := s.db.WithContext(ctx).
+				Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, pendingStream.ID, contentBlobHashes).
+				Delete(&db.PendingBlob{}).Error
+			if err != nil {
+				return fmt.Errorf("failed to cleanup pending blobs: %w", err)
+			}
+		}
+	}
+
+	// Clean up pending stream (SD blob) by SD hash
+	// This will succeed even if no record exists (no-op)
+	err := s.db.WithContext(ctx).
+		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
+		Delete(&db.PendingStream{}).Error
+	if err != nil {
+		return fmt.Errorf("failed to cleanup pending stream: %w", err)
+	}
 
 	return nil
 }
@@ -261,6 +488,37 @@ func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, fil
 	}
 
 	return streams, total, nil
+}
+
+// GetPendingStream retrieves pending stream metadata by user ID and SD hash
+func (s *UploadServiceDefault) GetPendingStream(ctx context.Context, userID uint, sdHash string) (*db.PendingStream, error) {
+	var pendingStream db.PendingStream
+	err := s.db.WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("pending stream not found for user %d and SD hash %s", userID, sdHash)
+		}
+		return nil, fmt.Errorf("failed to get pending stream: %w", err)
+	}
+	return &pendingStream, nil
+}
+
+// GetPendingBlobs retrieves pending blobs for a given SD hash
+func (s *UploadServiceDefault) GetPendingBlobs(ctx context.Context, userID uint, sdHash string) ([]*db.PendingBlob, error) {
+	// First get the pending stream to find its ID
+	var pendingStream db.PendingStream
+	err := s.db.WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pending stream for user %d and SD hash %s: %w", userID, sdHash, err)
+	}
+
+	// Now get pending blobs for this specific stream
+	var pendingBlobs []*db.PendingBlob
+	err = s.db.WithContext(ctx).Where("user_id = ? AND stream_id = ?", userID, pendingStream.ID).Order("blob_number").Find(&pendingBlobs).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pending blobs for user %d and SD hash %s: %w", userID, sdHash, err)
+	}
+	return pendingBlobs, nil
 }
 
 // DeleteStream removes only the user's stream pin by SD hash

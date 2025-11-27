@@ -70,7 +70,7 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 
 	// Add chunk handler for blob management
 	streamOpts = append(streamOpts, stream.WithChunkHandler(func(chunk stream.Chunk) error {
-		return blobManager.AddBlob(chunk.Hash, chunk.Data)
+		return blobManager.AddBlob(ctx, chunk.Hash, chunk.Data)
 	}))
 
 	// Create SD blob for metadata
@@ -104,7 +104,7 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 		return nil, fmt.Errorf("failed to convert SDBlob to blob: %w", err)
 	}
 
-	err = blobManager.AddSDBlob(streamResult.SDBlobHash, sdBlobBytes)
+	err = blobManager.AddSDBlob(ctx, streamResult.SDBlobHash, sdBlobBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add SDBlob to blob manager: %w", err)
 	}
@@ -112,7 +112,7 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 	// Process stream result using shared utility
 	// Note: userID is converted from uint64 to uint - this is safe as userID represents a DB PK
 	// and conversion will not truncate valid values in this system
-	err = ProcessStreamResult(ctx, p.ctx, streamResult, streamResult.SDBlobHash, uint(userID))
+	err = ProcessStreamResult(ctx, p.ctx, streamResult, uint(userID))
 	if err != nil {
 		return nil, err
 	}

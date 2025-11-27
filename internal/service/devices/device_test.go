@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
+	pluginMocks "go.lumeweb.com/portal-plugin-lbry/core/mocks"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db/migrations"
@@ -16,6 +17,7 @@ import (
 	coreTesting "go.lumeweb.com/portal/core/testing"
 	"go.lumeweb.com/portal/service"
 	"go.lumeweb.com/queryutil"
+	"gorm.io/gorm"
 )
 
 const (
@@ -32,6 +34,9 @@ func getTestOptions() coreTesting.TestContextBuilderOption {
 	var freeReflectorPort, _ = pluginTesting.GetFreePort()
 
 	return coreTesting.CombineOptions(
+		coreTesting.WithServiceFactory(core.WORKFLOW_SERVICE, service.NewWorkflowCoordinator),
+		coreTesting.WithServiceFactory(pluginCore.DEVICE_SERVICE, NewDeviceService),
+		coreTesting.WithMockServiceFactory(pluginCore.UPLOAD_SERVICE, pluginMocks.NewMockUploadService),
 		coreTesting.WithProtocol(internal.ProtocolName, protocol.NewProtocol),
 		coreTesting.WithConfig("plugin.lbry.protocol.peer_port", uint(freePeerPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.dht_port", uint(freeDhtPort)),
@@ -42,8 +47,6 @@ func getTestOptions() coreTesting.TestContextBuilderOption {
 			DHTPort:       uint(freeDhtPort),
 			ReflectorPort: uint(freeReflectorPort),
 		}),
-		coreTesting.WithServiceFactory(core.WORKFLOW_SERVICE, service.NewWorkflowCoordinator),
-		coreTesting.WithServiceFactory(pluginCore.DEVICE_SERVICE, NewDeviceService),
 		coreTesting.WithSQLitePluginMigrations(
 			internal.ProtocolName, migrations.GetSQLite(),
 		),
@@ -172,7 +175,7 @@ func TestDeviceServiceDefault_UpdateDevice(t *testing.T) {
 			newName:     "Updated Device",
 			newIP:       "192.168.1.200",
 			expectError: true,
-			errorMsg:    "device not found",
+			errorMsg:    gorm.ErrRecordNotFound.Error(),
 		},
 		{
 			name:        "invalid IP address",
@@ -259,7 +262,7 @@ func TestDeviceServiceDefault_UpdateDeviceName(t *testing.T) {
 			deviceID:    999,
 			newName:     "Updated Device Name",
 			expectError: true,
-			errorMsg:    "device not found",
+			errorMsg:    gorm.ErrRecordNotFound.Error(),
 		},
 	}
 
@@ -329,14 +332,14 @@ func TestDeviceService_GetDevice(t *testing.T) {
 				userID:      999,
 				deviceID:    createdDevice.ID,
 				expectError: true,
-				errorMsg:    "device not found",
+				errorMsg:    gorm.ErrRecordNotFound.Error(),
 			},
 			{
 				name:        "device not found",
 				userID:      testUserID,
 				deviceID:    999,
 				expectError: true,
-				errorMsg:    "device not found",
+				errorMsg:    gorm.ErrRecordNotFound.Error(),
 			},
 		}
 
@@ -502,7 +505,7 @@ func TestDeviceServiceDefault_DeleteDevice(t *testing.T) {
 			// Verify the device is actually deleted
 			_, err = deviceSvc.GetDevice(context.Background(), testUserID, createdDevice.ID)
 			assert.Error(tb, err)
-			assert.Contains(tb, err.Error(), "device not found")
+			assert.Contains(tb, err.Error(), gorm.ErrRecordNotFound.Error())
 		}, getTestOptions())
 	})
 
@@ -567,37 +570,27 @@ func TestDeviceService_GetDeviceByIPAddress(t *testing.T) {
 
 		tests := []struct {
 			name        string
-			userID      uint
 			ipAddress   string
 			expectError bool
 			errorMsg    string
 		}{
 			{
 				name:        "successful device retrieval by IP",
-				userID:      testUserID,
 				ipAddress:   testIPv4,
 				expectError: false,
 			},
 			{
-				name:        "device not found by IP - wrong user",
-				userID:      999,
-				ipAddress:   testIPv4,
-				expectError: true,
-				errorMsg:    "device not found",
-			},
-			{
 				name:        "device not found by IP - non-existent IP",
-				userID:      testUserID,
 				ipAddress:   "192.168.1.999",
 				expectError: true,
-				errorMsg:    "device not found",
+				errorMsg:    gorm.ErrRecordNotFound.Error(),
 			},
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				// Act
-				device, err := deviceSvc.GetDeviceByIPAddress(context.Background(), tt.userID, tt.ipAddress)
+				device, err := deviceSvc.GetDeviceByIPAddress(context.Background(), tt.ipAddress)
 
 				// Assert
 				if tt.expectError {
