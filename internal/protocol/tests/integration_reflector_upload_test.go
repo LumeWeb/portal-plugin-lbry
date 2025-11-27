@@ -47,7 +47,7 @@ func TestIntegration_ReflectorUpload(t *testing.T) {
 		require.NotEmpty(tb, uploadHash, "Upload hash should not be empty")
 
 		// Wait for workflow completion
-		waitForWorkflowCompletion(tb, ctx, userID, uploadHash)
+		waitForWorkflowCompletion(tb, ctx, userID)
 
 		// Verify stream via API
 		streamResponse := verifyStreamViaAPI(tb, ctx, token, uploadHash)
@@ -105,7 +105,7 @@ func generateRandomStream(tb testing.TB, streamName, suggestedFileName string) (
 // uploadStreamToReflector uploads a stream to the reflector server
 func uploadStreamToReflector(ctx coreTesting.TestContext, streamResult *stream.StreamResult) (string, error) {
 	tb := ctx.T()
-	tb.Log("Uploading stream to reflector server on port 5666")
+	tb.Logf("Uploading stream to reflector server")
 
 	// Create reflector client
 	client := protocol.NewReflectorClient(
@@ -185,12 +185,4 @@ func createDeviceViaAPI(ctx coreTesting.TestContext, token, name, ipAddress stri
 	}
 
 	return fmt.Sprintf("%d", response.ID), nil
-}
-
-// verifyReflectorUpload verifies that the upload was successful on the reflector server
-func verifyReflectorUpload(ctx coreTesting.TestContext, uploadHash string) error {
-	// TODO: Implement reflector upload verification
-	// This should verify that the upload is properly stored on the reflector server
-
-	return fmt.Errorf("reflector upload verification not implemented")
 }

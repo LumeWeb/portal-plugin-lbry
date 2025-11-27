@@ -30,7 +30,7 @@ func TestIntegration_UploadAndDownload(t *testing.T) {
 		require.NotEmpty(tb, uploadHash, "Upload hash should not be empty")
 
 		// Wait for workflow completion using realistic polling
-		waitForWorkflowCompletion(tb, ctx, userID, uploadHash)
+		waitForWorkflowCompletion(tb, ctx, userID)
 
 		// Verify stream was created via API
 		streamRecord := verifyStreamViaAPI(tb, ctx, token, uploadHash)

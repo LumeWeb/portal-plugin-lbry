@@ -18,7 +18,6 @@ import (
 	"go.lumeweb.com/liblbry/client"
 	"go.lumeweb.com/liblbry/protocol"
 	"go.lumeweb.com/liblbry/storage/memory"
-	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/api/dto"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
@@ -55,7 +54,7 @@ func GetPluginTestOptions() []coreTesting.TestContextBuilderOption {
 
 		coreTesting.WithConfig("plugin.lbry.protocol.peer_port", uint(freePeerPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.dht_port", uint(freeDhtPort)),
-		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeDhtPort)),
+		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeReflectorPort)),
 		coreTesting.WithConfig("plugin.lbry.protocol.fixed_peers", []string{"s1.lbry.network:4444"}),
 		coreTesting.WithAPIID(internal.ProtocolName),
 		coreTesting.WithProtocolConfig(internal.ProtocolName, pluginConfig.ProtocolConfig{
@@ -258,13 +257,10 @@ func createTestUserAndLogin(ctx coreTesting.TestContext) (string, uint) {
 }
 
 // waitForWorkflowCompletion waits for the workflow to complete
-func waitForWorkflowCompletion(tb coreTesting.TB, ctx coreTesting.TestContext, userID uint, uploadHash string) {
+func waitForWorkflowCompletion(tb coreTesting.TB, ctx coreTesting.TestContext, userID uint) {
 	// Get services needed for checking workflow completion
 	workflowSvc := core.GetService[core.WorkflowService](ctx, core.WORKFLOW_SERVICE)
 	require.NotNil(tb, workflowSvc, "Workflow service should be available")
-
-	uploadSvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
-	require.NotNil(tb, uploadSvc, "Upload service should be available")
 
 	// First verify that a workflow was actually created
 	_, initialTotal, err := workflowSvc.ListWorkflowInstances(

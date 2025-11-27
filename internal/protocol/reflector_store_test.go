@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"errors"
 	"io"
 	"testing"
 
@@ -91,13 +90,7 @@ func TestReflectorStore_ExtractUserIDFromContext_ReflectorSource(t *testing.T) {
 				result := store.extractUserIDFromContext(tc.ctx)
 
 				// Assert
-				ast := assert.New(t)
-				ast.Equal(tc.expectedID, result)
-				if tc.shouldError {
-					ast.Equal(uint(0), result)
-				} else {
-					ast.NotEqual(uint(0), result)
-				}
+				assert.Equal(t, tc.expectedID, result)
 			})
 		}
 	})
@@ -329,7 +322,7 @@ func TestReflectorStore_PutSD(t *testing.T) {
 
 		// Set up mock expectation for GetPendingStream (should return nil to indicate no existing stream)
 		mockUploadService.EXPECT().GetPendingStream(mock.Anything, userID, testHash).
-			Return(nil, errors.New("not found")).Once()
+			Return(nil, gorm.ErrRecordNotFound).Once()
 
 		// Set up mock expectation for StorePendingStream
 		mockUploadService.EXPECT().StorePendingStream(mock.Anything, userID, deviceID, mock.AnythingOfType("*stream.SDBlob"), testHash).
@@ -372,7 +365,7 @@ func TestReflectorStore_PutSD_ErrorCases(t *testing.T) {
 				errorMsg:    "user ID not found in context",
 			},
 			{
-				name:        "invalid SD blob data",
+				name:        "reflector source without IP address",
 				ctx:         context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector),
 				data:        []byte("invalid sd blob"),
 				expectError: true,

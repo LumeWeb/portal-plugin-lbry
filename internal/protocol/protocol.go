@@ -40,17 +40,10 @@ type accessControl struct {
 
 // newAccessControl creates a new accessControl instance with proper error handling
 func newAccessControl(ctx core.Context) (*accessControl, error) {
-	logger := ctx.Logger()
-
 	// Get device service
 	deviceSvc := core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
 	if deviceSvc == nil {
-		logger.Warn("Device service not available for access control")
-		// Create a basic access control that allows all by default
-		return &accessControl{
-			ctx:           ctx,
-			deviceService: nil,
-		}, nil
+		return nil, fmt.Errorf("device service not available for access control")
 	}
 
 	return &accessControl{
@@ -485,13 +478,6 @@ func buildServer(ctx core.Context, reflectorStore *ReflectorStore) (server.Serve
 		dhtOptions = append(dhtOptions, protocol.WithDHTNetworkScan(true))
 	}
 
-	// Create access control
-	accessControlInstance, err := newAccessControl(ctx)
-	if err != nil {
-		ctx.Logger().Error("Failed to create access control", zap.Error(err))
-		return nil, err
-	}
-
 	builder := server.NewServerBuilder().
 		WithStorage(store).
 		WithDHT().
@@ -502,6 +488,13 @@ func buildServer(ctx core.Context, reflectorStore *ReflectorStore) (server.Serve
 		WithLogger(ctx.Logger().Logger)
 
 	if protoCfg != nil {
+		// Create access control
+		accessControlInstance, err := newAccessControl(ctx)
+		if err != nil {
+			ctx.Logger().Error("Failed to create access control", zap.Error(err))
+			return nil, err
+		}
+
 		builder = builder.
 			WithPeer(int(protoCfg.PeerPort)).
 			WithReflector(int(protoCfg.ReflectorPort)).

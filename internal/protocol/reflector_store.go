@@ -19,11 +19,6 @@ type userIDContextKey struct{}
 
 const REFLECTOR_STORE_NAME = "reflector"
 
-// getBlobPath generates the blob path in the format "{userID}/{blobHash}"
-func getBlobPath(userID uint, blobHash []byte) string {
-	return fmt.Sprintf("%d/%s", userID, string(blobHash))
-}
-
 // ReflectorStore implements a minimal blob store for pending blobs during upload workflow
 // It delegates to the upload service API and uses S3 temporary storage
 type ReflectorStore struct {
@@ -114,7 +109,7 @@ func (rs *ReflectorStore) PutSD(ctx context.Context, hash string, data []byte) e
 			zap.String("sd_hash", hash),
 			zap.Uint("user_id", userID),
 			zap.Error(err))
-		// Don't return error here - the pending stream was stored successfully
+		return fmt.Errorf("failed to start reflector assembly workflow: %w", err)
 	} else {
 		rs.logger.Debug("Successfully started reflector assembly workflow",
 			zap.String("sd_hash", hash),
@@ -341,6 +336,13 @@ func (rs *ReflectorStore) extractUserIDFromContext(ctx context.Context) uint {
 		return 0
 	}
 
+	// Explicit nil check to prevent pointer dereference
+	if device == nil {
+		rs.logger.Warn("Device lookup returned nil device",
+			zap.String("ip_address", ipAddress))
+		return 0
+	}
+
 	rs.logger.Debug("Successfully looked up user by device IP",
 		zap.String("ip_address", ipAddress),
 		zap.Uint("device_id", device.ID),
@@ -369,6 +371,11 @@ func (rs *ReflectorStore) extractDeviceIDFromContext(ctx context.Context) (uint,
 	device, err := rs.deviceSvc.GetDeviceByIPAddress(ctx, ipAddress)
 	if err != nil {
 		return 0, fmt.Errorf("failed to look up device by IP address %q: %w", ipAddress, err)
+	}
+
+	// Explicit nil check to prevent pointer dereference
+	if device == nil {
+		return 0, fmt.Errorf("device not found for IP %q", ipAddress)
 	}
 
 	return device.ID, nil

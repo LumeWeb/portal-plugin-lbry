@@ -232,7 +232,7 @@ func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, d
 		DeviceID:          deviceID,
 	}
 
-	err := s.db.Clauses(clause.OnConflict{
+	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_id"}, {Name: "sd_hash"}},
 		DoUpdates: clause.Set{
 			{Column: clause.Column{Name: "stream_hash"}, Value: pendingStream.StreamHash},

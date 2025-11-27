@@ -139,7 +139,7 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 	}
 
 	if len(missingBlobs) > 0 {
-		h.Logger().Error("Missing blobs for stream assembly",
+		h.Logger().Info("Missing blobs for stream assembly, will retry",
 			zap.Uint("user_id", userID),
 			zap.String("sd_blob_hash", sdBlobHash),
 			zap.Strings("missing_blobs", missingBlobs))
@@ -378,9 +378,8 @@ func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx con
 			continue
 		}
 
-		// Create BlobInfo - we don't have IV data in pending blobs, so we'll use empty IV
-		// This is acceptable for reconstruction purposes since the actual IV data will be
-		// stored when the blobs are properly processed
+		// Create BlobInfo using the IV data from the pending blob
+		// The IV data is available from when the blob was initially uploaded
 		blobInfo := lbrystream.BlobInfo{
 			Length:   pendingBlob.BlobSize,
 			BlobNum:  pendingBlob.BlobNumber, // Use blob number from database
@@ -393,6 +392,9 @@ func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx con
 	return blobInfos, nil
 }
 
+// Cleanup handles cleanup for the reflector assembly operation.
+// Note: Cleanup is handled within assembleStream after successful processing,
+// so this method is intentionally a no-op.
 func (h *ReflectorAssemblyOperationHandler) Cleanup(ctx context.Context, req *models.Request) error {
 	return nil
 }
