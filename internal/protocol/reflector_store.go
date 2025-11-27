@@ -181,7 +181,7 @@ func (rs *ReflectorStore) Has(ctx context.Context, hash string) (bool, error) {
 
 // isTerminatingBlob checks if a blob is a terminating blob (hash is empty)
 // A terminating blob is the last blob in a stream with empty hash
-func (rs *ReflectorStore) isTerminatingBlob(userID uint, hash string) (bool, error) {
+func (rs *ReflectorStore) isTerminatingBlob(userID uint, hash string) bool {
 	// If hash is empty, it's a terminating blob
 	isTerminating := hash == ""
 
@@ -191,7 +191,7 @@ func (rs *ReflectorStore) isTerminatingBlob(userID uint, hash string) (bool, err
 			zap.Uint("user_id", userID))
 	}
 
-	return isTerminating, nil
+	return isTerminating
 }
 
 // Get retrieves a blob by its hash from temporary storage
@@ -206,10 +206,7 @@ func (rs *ReflectorStore) Get(ctx context.Context, hash string) ([]byte, error) 
 	}
 
 	// Check if this is a terminating blob (hash and size are 0)
-	isTerminating, err := rs.isTerminatingBlob(userID, hash)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check if blob %q is terminating: %w", hash, err)
-	}
+	isTerminating := rs.isTerminatingBlob(userID, hash)
 
 	if isTerminating {
 		rs.logger.Debug("Building terminating blob",

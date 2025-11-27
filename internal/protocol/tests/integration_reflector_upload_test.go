@@ -50,7 +50,7 @@ func TestIntegration_ReflectorUpload(t *testing.T) {
 		waitForWorkflowCompletion(tb, ctx, userID)
 
 		// Verify stream via API
-		streamResponse := verifyStreamViaAPI(tb, ctx, token, uploadHash)
+		streamResponse := verifyStreamViaAPI(tb, ctx, token)
 		require.NotNil(tb, streamResponse, "Stream should be accessible via API")
 		require.NotEmpty(tb, streamResponse.StreamHash, "Stream hash should not be empty")
 

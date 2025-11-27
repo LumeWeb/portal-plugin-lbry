@@ -86,11 +86,11 @@ func uploadFileViaAPI(tb coreTesting.TB, ctx coreTesting.TestContext, token, con
 
 	// Create multipart request with metadata
 	body := &bytes.Buffer{}
-	writer := createMultipartWriter(tb, body, content, filename, streamName, suggestedFileName)
+	boundary := createMultipartWriter(tb, body, content, filename, streamName, suggestedFileName)
 
 	// Create HTTP request
 	req := ctx.NewAPIRequest(http.MethodPost, "/api/streams/upload", body.Bytes())
-	req.Header.Set("Content-Type", "multipart/form-data; boundary="+writer.Boundary())
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 
 	// Execute request
@@ -99,7 +99,12 @@ func uploadFileViaAPI(tb coreTesting.TB, ctx coreTesting.TestContext, token, con
 
 	// Verify response
 	if rec.Code != http.StatusCreated {
-		return "", fmt.Errorf("upload failed with status code: %d", rec.Code)
+		// Include response body for debugging failed uploads
+		bodyStr := rec.Body.String()
+		if len(bodyStr) > 200 {
+			bodyStr = bodyStr[:200] + "..." // Truncate for readability
+		}
+		return "", fmt.Errorf("upload failed with status code: %d, response body: %s", rec.Code, bodyStr)
 	}
 
 	var response dto.PostStreamUploadResponse
@@ -116,7 +121,8 @@ func uploadFileViaAPI(tb coreTesting.TB, ctx coreTesting.TestContext, token, con
 }
 
 // createMultipartWriter creates a multipart writer with metadata and file content
-func createMultipartWriter(tb coreTesting.TB, body *bytes.Buffer, content, filename, streamName, suggestedFileName string) *multipart.Writer {
+func createMultipartWriter(tb coreTesting.TB, body *bytes.Buffer, content, filename, streamName, suggestedFileName string) string {
+	tb.Helper()
 	writer := multipart.NewWriter(body)
 
 	// Add metadata
@@ -142,7 +148,7 @@ func createMultipartWriter(tb coreTesting.TB, body *bytes.Buffer, content, filen
 	err = writer.Close()
 	require.NoError(tb, err, "Should close multipart writer")
 
-	return writer
+	return writer.Boundary()
 }
 
 // createTestBlobAcquirer creates a test blob acquirer with DHT, peer transfer, and memory storage
@@ -212,6 +218,7 @@ func createTestBlobAcquirer(ctx coreTesting.TestContext) (client.StreamAcquirer,
 // testBlobDownload tests downloading a blob by stream hash
 func testBlobDownload(ctx coreTesting.TestContext, streamHash string) (string, error) {
 	tb := ctx.T()
+	tb.Helper()
 	tb.Logf("Testing blob download for stream with hash: %s", streamHash)
 
 	// Verify we can access the stream hash
@@ -316,7 +323,9 @@ func waitForWorkflowCompletion(tb coreTesting.TB, ctx coreTesting.TestContext, u
 	tb.Fatalf("Workflow did not complete within %v", maxWait)
 }
 
-func verifyStreamViaAPI(tb coreTesting.TB, ctx coreTesting.TestContext, token, uploadHash string) *dto.StreamResponse {
+func verifyStreamViaAPI(tb coreTesting.TB, ctx coreTesting.TestContext, token string) *dto.StreamResponse {
+	tb.Helper()
+
 	req := ctx.NewAPIRequest(http.MethodGet, "/api/streams", nil)
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
 

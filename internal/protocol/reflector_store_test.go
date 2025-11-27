@@ -344,6 +344,15 @@ func TestReflectorStore_PutSD(t *testing.T) {
 	})
 }
 
+// createValidReflectorContext creates a valid context with reflector source and IP address
+// This helper function sets up a context that will pass user ID validation but fail SD blob validation
+func createValidReflectorContext() context.Context {
+	testIPAddress := "192.168.1.100"
+	ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
+	ctxWithIP := context.WithValue(ctxWithSource, protocol.IPAddressContextKey, testIPAddress)
+	return ctxWithIP
+}
+
 func TestReflectorStore_PutSD_ErrorCases(t *testing.T) {
 	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
 		// Arrange
@@ -371,10 +380,42 @@ func TestReflectorStore_PutSD_ErrorCases(t *testing.T) {
 				expectError: true,
 				errorMsg:    "user ID not found in context",
 			},
+			{
+				name:        "valid context but invalid SD blob data",
+				ctx:         createValidReflectorContext(),
+				data:        []byte("this is not a valid SD blob - just random text"),
+				expectError: true,
+				errorMsg:    "invalid SD blob",
+			},
+			{
+				name:        "valid context but malformed SD blob binary data",
+				ctx:         createValidReflectorContext(),
+				data:        []byte{0x00, 0x01, 0x02, 0x03}, // Invalid binary data
+				expectError: true,
+				errorMsg:    "invalid SD blob",
+			},
 		}
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
+				// Set up mock expectations for valid context cases
+				if tc.name == "valid context but invalid SD blob data" || tc.name == "valid context but malformed SD blob binary data" {
+					// Mock device service for user ID lookup
+					mockDeviceService := pluginMocks.NewMockDeviceService(t)
+					store.deviceSvc = mockDeviceService
+
+					testDevice := &pluginDb.Device{
+						Model: gorm.Model{
+							ID: 1,
+						},
+						UserID:    123,
+						Name:      "test-device",
+						IPAddress: "192.168.1.100",
+					}
+					mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, "192.168.1.100").
+						Return(testDevice, nil).Once()
+				}
+
 				// Act
 				err := store.PutSD(tc.ctx, "test_hash", tc.data)
 

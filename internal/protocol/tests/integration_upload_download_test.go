@@ -33,7 +33,7 @@ func TestIntegration_UploadAndDownload(t *testing.T) {
 		waitForWorkflowCompletion(tb, ctx, userID)
 
 		// Verify stream was created via API
-		streamRecord := verifyStreamViaAPI(tb, ctx, token, uploadHash)
+		streamRecord := verifyStreamViaAPI(tb, ctx, token)
 		require.NotNil(tb, streamRecord, "Stream should be created and accessible via API")
 
 		// Test blob download
