@@ -976,19 +976,6 @@ func createTestPendingStream(ctx coreTesting.TestContext, userID, deviceID uint,
 	return pendingStream
 }
 
-func setupTestPendingData(ctx coreTesting.TestContext, userID, deviceID uint) ([]*db.PendingBlob, *db.PendingStream) {
-	// Create test pending stream
-	pendingStream := createTestPendingStream(ctx, userID, deviceID,
-		testUploadHash1, testUploadHash2, "test_stream", "video", "test.mp4", []byte("test_key"))
-
-	// Create test pending blobs
-	pendingBlob1 := createTestPendingBlob(ctx, userID, deviceID, pendingStream.ID, testUploadHash3, 1024, 1, true, []byte("iv1"))
-	pendingBlob2 := createTestPendingBlob(ctx, userID, deviceID, pendingStream.ID, testUploadHash4, 2048, 2, true, []byte("iv2"))
-	pendingBlobs := []*db.PendingBlob{pendingBlob1, pendingBlob2}
-
-	return pendingBlobs, pendingStream
-}
-
 func setupTestStreamData(ctx coreTesting.TestContext, userID uint64) ([]*db.Stream, []*db.StreamPin, []*db.StreamBlob) {
 	// Create test streams
 	stream1 := createTestStream(ctx, "test_stream_1", testUploadHash1)
@@ -1055,8 +1042,8 @@ func TestUploadServiceDefault_StorePendingBlob(t *testing.T) {
 			setupData: func(ctx coreTesting.TestContext) (uint, error) {
 				// Create a pending stream first using helper function
 				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, "test_sd_hash", "test_stream", "lbryfile", "test_file.txt", []byte("test_key"))
-				// Create existing pending blob
-				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, testUploadHash3, 1024, 1, true, []byte("old_iv"))
+				// Create existing pending blob using the same hex encoding as StorePendingBlob
+				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, hex.EncodeToString([]byte(testUploadHash3)), 1024, 1, true, []byte("old_iv"))
 				return pendingStream.ID, nil
 			},
 			expectError: false,
@@ -1210,6 +1197,15 @@ func TestUploadServiceDefault_StorePendingStream(t *testing.T) {
 			expectError: false,
 			description: "should handle minimal stream data gracefully",
 		},
+		{
+			name:        "error with nil sdBlob",
+			userID:      1,
+			deviceID:    1,
+			sdBlob:      nil,
+			sdHash:      testUploadHash1,
+			expectError: true,
+			description: "should return error when sdBlob is nil",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1292,7 +1288,7 @@ func TestUploadServiceDefault_GetMissingBlobs(t *testing.T) {
 		name            string
 		userID          uint
 		requiredBlobs   []string
-		setupData       func(ctx coreTesting.TestContext, uploadsvc pluginCore.UploadService) (uint, error)
+		setupData       func(ctx coreTesting.TestContext) (uint, error)
 		expectedMissing []string
 		expectError     bool
 		description     string
@@ -1301,7 +1297,7 @@ func TestUploadServiceDefault_GetMissingBlobs(t *testing.T) {
 			name:          "no missing blobs",
 			userID:        1,
 			requiredBlobs: []string{testUploadHash3, testUploadHash4},
-			setupData: func(ctx coreTesting.TestContext, uploadsvc pluginCore.UploadService) (uint, error) {
+			setupData: func(ctx coreTesting.TestContext) (uint, error) {
 				// Create a pending stream first using helper
 				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, "test_sd_hash", "test_stream", "lbryfile", "test_file.txt", []byte("test_key"))
 				// Create all required pending blobs
@@ -1317,7 +1313,7 @@ func TestUploadServiceDefault_GetMissingBlobs(t *testing.T) {
 			name:          "some missing blobs",
 			userID:        1,
 			requiredBlobs: []string{testUploadHash3, testUploadHash4, testUploadHash1},
-			setupData: func(ctx coreTesting.TestContext, uploadsvc pluginCore.UploadService) (uint, error) {
+			setupData: func(ctx coreTesting.TestContext) (uint, error) {
 				// Create a pending stream first using helper
 				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, "test_sd_hash", "test_stream", "lbryfile", "test_file.txt", []byte("test_key"))
 				// Create only some of the required pending blobs
@@ -1333,7 +1329,7 @@ func TestUploadServiceDefault_GetMissingBlobs(t *testing.T) {
 			name:            "all missing blobs",
 			userID:          1,
 			requiredBlobs:   []string{testUploadHash3, testUploadHash4},
-			setupData:       func(ctx coreTesting.TestContext, uploadsvc pluginCore.UploadService) (uint, error) { return 0, nil }, // No blobs created
+			setupData:       func(ctx coreTesting.TestContext) (uint, error) { return 0, nil }, // No blobs created
 			expectedMissing: []string{testUploadHash3, testUploadHash4},
 			expectError:     false,
 			description:     "should return all required blobs when none are available",
@@ -1342,7 +1338,7 @@ func TestUploadServiceDefault_GetMissingBlobs(t *testing.T) {
 			name:            "empty required blobs list",
 			userID:          1,
 			requiredBlobs:   []string{},
-			setupData:       func(ctx coreTesting.TestContext, uploadsvc pluginCore.UploadService) (uint, error) { return 0, nil },
+			setupData:       func(ctx coreTesting.TestContext) (uint, error) { return 0, nil },
 			expectedMissing: []string{},
 			expectError:     false,
 			description:     "should handle empty required blobs list gracefully",
@@ -1351,7 +1347,7 @@ func TestUploadServiceDefault_GetMissingBlobs(t *testing.T) {
 			name:          "blobs from different user",
 			userID:        1,
 			requiredBlobs: []string{testUploadHash3},
-			setupData: func(ctx coreTesting.TestContext, uploadsvc pluginCore.UploadService) (uint, error) {
+			setupData: func(ctx coreTesting.TestContext) (uint, error) {
 				// Create blob for different user
 				createTestPendingBlob(ctx, 2, 1, 0, testUploadHash3, 1024, 1, true, []byte("iv1"))
 				return 0, nil
@@ -1370,7 +1366,7 @@ func TestUploadServiceDefault_GetMissingBlobs(t *testing.T) {
 				require.NotNil(tb, uploadsvc)
 
 				// Setup test data
-				streamID, err := tt.setupData(ctx, uploadsvc)
+				streamID, err := tt.setupData(ctx)
 				require.NoError(tb, err)
 
 				// Act
@@ -1408,9 +1404,9 @@ func TestUploadServiceDefault_CleanupPendingBlobs(t *testing.T) {
 			setupData: func(ctx coreTesting.TestContext) {
 				// Create pending stream first to get streamID
 				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, testUploadHash2, "test_stream", "video", "test.mp4", []byte("test_key"))
-				// Create pending blobs associated with the stream
-				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, testUploadHash3, 1024, 1, true, []byte("iv1"))
-				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, testUploadHash4, 2048, 2, true, []byte("iv2"))
+				// Create pending blobs associated with the stream (using hex encoding like StorePendingBlob)
+				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, hex.EncodeToString([]byte(testUploadHash3)), 1024, 1, true, []byte("iv1"))
+				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, hex.EncodeToString([]byte(testUploadHash4)), 2048, 2, true, []byte("iv2"))
 			},
 			expectError: false,
 			description: "should successfully cleanup pending blobs and stream",
@@ -1434,7 +1430,9 @@ func TestUploadServiceDefault_CleanupPendingBlobs(t *testing.T) {
 				SDBlobHash:   testUploadHash2,
 			},
 			setupData: func(ctx coreTesting.TestContext) {
-				createTestPendingStream(ctx, 1, 1, testUploadHash1, testUploadHash2, "test_stream", "video", "test.mp4", []byte("test_key"))
+				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, testUploadHash2, "test_stream", "video", "test.mp4", []byte("test_key"))
+				// Create a pending blob that should remain since ContentBlobs is empty (using hex encoding like StorePendingBlob)
+				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, hex.EncodeToString([]byte(testUploadHash3)), 1024, 1, true, []byte("iv1"))
 			},
 			expectError: false,
 			description: "should cleanup only pending stream when no content blobs",
@@ -1451,8 +1449,13 @@ func TestUploadServiceDefault_CleanupPendingBlobs(t *testing.T) {
 				// Setup test data
 				tt.setupData(ctx)
 
+				// Capture initial blob count before cleanup
+				var initialBlobs int64
+				err := ctx.DB().Model(&db.PendingBlob{}).Where("user_id = ?", tt.userID).Count(&initialBlobs).Error
+				require.NoError(tb, err)
+
 				// Act
-				err := uploadsvc.CleanupPendingBlobs(context.Background(), tt.userID, tt.streamResult)
+				err = uploadsvc.CleanupPendingBlobs(context.Background(), tt.userID, tt.streamResult)
 
 				// Assert
 				if tt.expectError {
@@ -1472,8 +1475,6 @@ func TestUploadServiceDefault_CleanupPendingBlobs(t *testing.T) {
 					expectedBlobs := 0
 					if len(tt.streamResult.ContentBlobs) == 0 {
 						// If no content blobs in stream result, we shouldn't delete any
-						var initialBlobs int64
-						_ = ctx.DB().Model(&db.PendingBlob{}).Where("user_id = ?", tt.userID).Count(&initialBlobs)
 						expectedBlobs = int(initialBlobs)
 					}
 					assert.Equal(tb, expectedBlobs, int(remainingBlobs))

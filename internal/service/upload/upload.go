@@ -218,6 +218,14 @@ func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, dev
 
 // StorePendingStream stores an SD blob with full stream metadata in pending state
 func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, deviceID uint, sdBlob *stream.SDBlob, sdHash string) (uint, error) {
+	// Validate input parameters
+	if sdBlob == nil {
+		return 0, fmt.Errorf("sdBlob cannot be nil")
+	}
+	if sdHash == "" {
+		return 0, fmt.Errorf("sdHash cannot be empty")
+	}
+
 	// Convert stream hash bytes to string
 	streamHash := hex.EncodeToString(sdBlob.StreamHash)
 
@@ -362,11 +370,20 @@ func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID u
 	// Clean up regular pending blobs associated with this specific stream
 	// Only do this if we found a pending stream
 	if findErr == nil {
-		err := s.db.WithContext(ctx).
-			Where("user_id = ? AND stream_id = ?", userID, pendingStream.ID).
-			Delete(&db.PendingBlob{}).Error
-		if err != nil {
-			return fmt.Errorf("failed to cleanup pending blobs: %w", err)
+		// If ContentBlobs is empty, don't delete any pending blobs
+		if len(streamResult.ContentBlobs) > 0 {
+			// Convert ContentBlobs to hex strings for comparison
+			contentBlobHashes := make([]string, len(streamResult.ContentBlobs))
+			for i, contentBlob := range streamResult.ContentBlobs {
+				contentBlobHashes[i] = hex.EncodeToString(contentBlob)
+			}
+
+			err := s.db.WithContext(ctx).
+				Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, pendingStream.ID, contentBlobHashes).
+				Delete(&db.PendingBlob{}).Error
+			if err != nil {
+				return fmt.Errorf("failed to cleanup pending blobs: %w", err)
+			}
 		}
 	}
 
