@@ -2,6 +2,7 @@ package config
 
 import (
 	z "github.com/Oudwins/zog"
+	"go.lumeweb.com/lbry-dht/bits"
 	"go.lumeweb.com/liblbry/protocol"
 	"go.lumeweb.com/portal/config"
 )
@@ -20,6 +21,7 @@ type ProtocolConfig struct {
 	FullDHT                  bool     `config:"full_dht"`
 	TransferDHTRetryAttempts int      `config:"transfer_dht_retry_attempts"`
 	TransferMaxPeers         int      `config:"transfer_max_peers"`
+	DHTNodeID                string   `config:"dht_node_id"`
 }
 
 func (c ProtocolConfig) Defaults() map[string]any {
@@ -31,6 +33,7 @@ func (c ProtocolConfig) Defaults() map[string]any {
 		"FullDHT":                  false,
 		"TransferDHTRetryAttempts": 5,
 		"TransferMaxPeers":         -1, // -1 represents math.MaxInt
+		"DHTNodeID":                bits.Rand().Hex(),
 	}
 }
 
@@ -45,5 +48,6 @@ func (c ProtocolConfig) Schema() z.ZogSchema {
 		"FullDHT":                  z.Bool(),
 		"TransferDHTRetryAttempts": z.Int(),
 		"TransferMaxPeers":         z.Int(),
+		"DHTNodeID":                z.String().Len(96),
 	})
 }
