@@ -12,7 +12,8 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/tus/tusd/v2 v2.8.0
 	go.lumeweb.com/httputil v0.5.3
-	go.lumeweb.com/liblbry v0.0.0-20251126033024-263ba5d8f169
+	go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639
+	go.lumeweb.com/liblbry v0.0.0-20251129060239-c9c27c14127a
 	go.lumeweb.com/portal v0.4.2-0.20251127051039-9d285282f553
 	go.lumeweb.com/portal-middleware v0.3.3
 	go.lumeweb.com/portal-router v0.6.8
@@ -177,7 +178,6 @@ require (
 	go.lumeweb.com/configmanager v0.3.20 // indirect
 	go.lumeweb.com/event/v2 v2.1.0 // indirect
 	go.lumeweb.com/gswagger v0.20.10 // indirect
-	go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639 // indirect
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
 	go.sia.tech/core v0.18.1 // indirect
 	go.sia.tech/coreutils v0.18.7 // indirect
