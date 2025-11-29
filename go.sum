@@ -544,6 +544,8 @@ go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639 h1:qOpSIFc0o2GCY1fS5N
 go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639/go.mod h1:9nE2dYybu+bfxSvufJyvCPU27U8uR2/5euxBhCrK6pI=
 go.lumeweb.com/liblbry v0.0.0-20251129060239-c9c27c14127a h1:zF5ZmBaqAFx2ZJnMKyQzYXZpAE5jfX48b3xh/SJKoOY=
 go.lumeweb.com/liblbry v0.0.0-20251129060239-c9c27c14127a/go.mod h1:jaxLOGeIjAvzsHuSycTrg8h4lmGZt6WHNq/AnAyvNj0=
+go.lumeweb.com/liblbry v0.0.0-20251129073709-31676ef618d3 h1:FevfN3FsiI/v4HgfTci+if9aeXOOGl4eelo1KhIgW10=
+go.lumeweb.com/liblbry v0.0.0-20251129073709-31676ef618d3/go.mod h1:jaxLOGeIjAvzsHuSycTrg8h4lmGZt6WHNq/AnAyvNj0=
 go.lumeweb.com/portal v0.4.2-0.20251127051039-9d285282f553 h1:gzq+h+dN0TvmCNXiOlRtfm+MjQmV5TV5flhuNFjVsvs=
 go.lumeweb.com/portal v0.4.2-0.20251127051039-9d285282f553/go.mod h1:U1WhagynZop46/yu3Tm3Kzeg+m6mDbWteDsUbn+fO64=
 go.lumeweb.com/portal-middleware v0.3.3 h1:hoqSOPGhKGS8yEULhccFHUFckkVjS0JduEFSVbn2X5A=
