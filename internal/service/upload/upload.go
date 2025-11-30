@@ -257,24 +257,6 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			return nil
 		}
 
-		// Helper function to detect duplicate key/conflict errors
-		isDuplicateKeyError := func(err error) bool {
-			if err == nil {
-				return false
-			}
-
-			// Check for GORM wrapped errors
-			if errors.Is(err, gorm.ErrDuplicatedKey) {
-				return true
-			}
-
-			// Check error message patterns for common duplicate key errors
-			errMsg := err.Error()
-			return strings.Contains(errMsg, "duplicate") ||
-				strings.Contains(errMsg, "UNIQUE constraint failed") ||
-				strings.Contains(errMsg, "unique constraint")
-		}
-
 		// Helper function to create new record with fallback to update
 		createWithFallback := func(pendingBlob db.PendingBlob, updates map[string]any) error {
 			err := tx.Create(&pendingBlob).Error
@@ -712,6 +694,24 @@ func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID u
 	return nil
 }
 
+// Helper function to detect duplicate key/conflict errors
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	// Check for GORM's duplicate key error
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	// Check error message patterns for common duplicate key errors
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "duplicate") ||
+		strings.Contains(errMsg, "UNIQUE constraint failed") ||
+		strings.Contains(errMsg, "unique constraint")
+}
+
 // CreateStreamPin creates an LBRY stream pin record
 func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint, sdCid cid.Cid) (*db.StreamPin, error) {
 	// Convert CID to stream hash string
@@ -754,8 +754,26 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 		StreamID: uint64(_stream.ID),
 	}
 
-	// Save the StreamPin to the database
+	// Save the StreamPin to the database with duplicate handling
 	if err = s.db.WithContext(ctx).Create(streamPin).Error; err != nil {
+		// Check if this is a duplicate key/constraint error
+		if isDuplicateKeyError(err) {
+			// If it's a duplicate, the pin was created by another concurrent request
+			// Fetch and return the existing pin
+			var existingPin db.StreamPin
+			err = s.db.WithContext(ctx).
+				Where("user_id = ? AND stream_id = ?", userId, _stream.ID).
+				First(&existingPin).Error
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch existing stream pin after duplicate constraint: %w", err)
+			}
+
+			s.logger.Debug("Stream pin created by concurrent request, returning existing pin",
+				zap.Uint("userID", userId),
+				zap.Uint("streamID", _stream.ID),
+				zap.String("sdHash", sdHash))
+			return &existingPin, nil
+		}
 		return nil, fmt.Errorf("failed to create stream pin: %w", err)
 	}
 
@@ -774,11 +792,11 @@ func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, fil
 
 	// Build the base query with user filter using GORM OOP
 	// Join with StreamPin to filter streams that belong to the user
+	// Explicitly exclude soft-deleted stream pins
 	query := s.db.WithContext(ctx).
 		Model(&db.Stream{}).
 		Joins("INNER JOIN lbry_stream_pins ON lbry_streams.id = lbry_stream_pins.stream_id").
-		Where("lbry_stream_pins.user_id = ?", userID).
-		Preload("StreamPin", "lbry_stream_pins.user_id = ?", userID)
+		Where("lbry_stream_pins.user_id = ? AND lbry_stream_pins.deleted_at IS NULL", userID)
 
 	// Apply filters using queryutil helper
 	query = queryutil.ApplyFilters(query, filters, nil)

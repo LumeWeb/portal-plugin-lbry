@@ -856,6 +856,133 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 	}
 }
 
+func TestUploadServiceDefault_ListStreams_AfterDeleteStream(t *testing.T) {
+	tests := []struct {
+		name          string
+		userID        uint
+		setupData     func(ctx coreTesting.TestContext) (string, string, error) // Returns (sdHashToDelete, sdHashToKeep, error)
+		expectCount   int64
+		expectResults int
+		expectError   bool
+		description   string
+	}{
+		{
+			name:   "deleted stream should not appear in list",
+			userID: 1,
+			setupData: func(ctx coreTesting.TestContext) (string, string, error) {
+				// Create test streams
+				stream1 := createTestStream(ctx, "test_stream_1", testUploadHash1)
+				stream2 := createTestStream(ctx, "test_stream_2", testUploadHash2)
+				stream3 := createTestStream(ctx, "test_stream_3", testUploadHash3)
+
+				// Create stream pins for user 1
+				createTestStreamPin(ctx, 1, uint64(stream1.ID))
+				createTestStreamPin(ctx, 1, uint64(stream2.ID))
+				createTestStreamPin(ctx, 1, uint64(stream3.ID))
+
+				// Create stream blobs
+				createTestStreamBlob(ctx, uint64(stream1.ID), 1001, 1)
+				createTestStreamBlob(ctx, uint64(stream2.ID), 2001, 1)
+				createTestStreamBlob(ctx, uint64(stream3.ID), 3001, 1)
+
+				return stream1.SDHash, stream2.SDHash, nil
+			},
+			expectCount:   2, // After deleting one, should have 2 remaining
+			expectResults: 2,
+			expectError:   false,
+			description:   "should not list streams after their pin is deleted",
+		},
+		{
+			name:   "other user's deleted stream should not affect their listing",
+			userID: 2,
+			setupData: func(ctx coreTesting.TestContext) (string, string, error) {
+				// Create test streams
+				stream1 := createTestStream(ctx, "shared_stream_1", testUploadHash1)
+				stream2 := createTestStream(ctx, "shared_stream_2", testUploadHash2)
+
+				// User 1 pins both streams
+				createTestStreamPin(ctx, 1, uint64(stream1.ID))
+				createTestStreamPin(ctx, 1, uint64(stream2.ID))
+
+				// User 2 pins only stream2
+				createTestStreamPin(ctx, 2, uint64(stream2.ID))
+
+				// Create stream blobs
+				createTestStreamBlob(ctx, uint64(stream1.ID), 1001, 1)
+				createTestStreamBlob(ctx, uint64(stream2.ID), 2001, 1)
+
+				return stream1.SDHash, stream2.SDHash, nil
+			},
+			expectCount:   1, // User 2 should still see stream2 even after user 1 deletes stream1
+			expectResults: 1,
+			expectError:   false,
+			description:   "should only list streams pinned by current user",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+				// Arrange
+				uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+				require.NotNil(tb, uploadsvc)
+
+				// Setup test data
+				sdHashToDelete, sdHashToKeep, err := tt.setupData(ctx)
+				require.NoError(tb, err)
+
+				// Verify initial state - user should see all their streams
+				_, initialTotal, err := uploadsvc.ListStreams(context.Background(), tt.userID, []queryutil.CrudFilter{}, []queryutil.Sort{}, queryutil.Pagination{
+					Start:    0,
+					End:      10,
+					PageSize: 10,
+					Mode:     "server",
+				})
+				require.NoError(tb, err)
+				require.Greater(tb, initialTotal, int64(0), "should have initial streams")
+
+				// Delete one stream (user 1's stream)
+				err = uploadsvc.DeleteStream(context.Background(), 1, sdHashToDelete)
+				require.NoError(tb, err)
+
+				// Act - List streams for the test user
+				streams, total, err := uploadsvc.ListStreams(context.Background(), tt.userID, []queryutil.CrudFilter{}, []queryutil.Sort{}, queryutil.Pagination{
+					Start:    0,
+					End:      10,
+					PageSize: 10,
+					Mode:     "server",
+				})
+
+				// Assert
+				if tt.expectError {
+					assert.Error(tb, err)
+				} else {
+					assert.NoError(tb, err)
+					assert.Equal(tb, tt.expectCount, total, "total count mismatch")
+					assert.Equal(tb, tt.expectResults, len(streams), "results count mismatch")
+
+					// Verify the deleted stream is not in the list
+					for _, stream := range streams {
+						assert.NotEqual(tb, sdHashToDelete, stream.SDHash, "deleted stream should not appear in list")
+					}
+
+					// If we expect to keep a stream, verify it's still there
+					if sdHashToKeep != "" && tt.expectResults > 0 {
+						found := false
+						for _, stream := range streams {
+							if stream.SDHash == sdHashToKeep {
+								found = true
+								break
+							}
+						}
+						assert.True(tb, found, "expected stream should still be in list")
+					}
+				}
+			}, getTestOptions())
+		})
+	}
+}
+
 func TestUploadServiceDefault_HandleUpload_ReaderErrors(t *testing.T) {
 	tests := []struct {
 		name         string
