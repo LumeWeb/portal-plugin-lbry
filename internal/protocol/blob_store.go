@@ -33,7 +33,7 @@ func (bs *BlobStore) convertToStorageHash(hash string) (core.StorageHash, error)
 
 // isTerminatingBlob checks if a hash represents a terminating blob
 func (bs *BlobStore) isTerminatingBlob(hash string) bool {
-	return hash == "" || hash == internal.TerminatingBlobHash
+	return hash == "" || hash == internal.GetTerminatingBlobHash()
 }
 
 // closeReaderSafely safely closes a reader if it implements io.Closer

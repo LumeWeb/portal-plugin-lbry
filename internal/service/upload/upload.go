@@ -111,9 +111,6 @@ func (s *UploadServiceDefault) HandleUpload(ctx context.Context, reader io.ReadS
 	// Cast to storage protocol with type safety
 	storageProtocol, err := util.CastToStorageProtocol(s.protocol)
 	if err != nil {
-		return cid.Undef, "", fmt.Errorf("failed to cast protocol to storage protocol: %w", err)
-	}
-	if err != nil {
 		s.logger.Error("Failed to cast protocol to storage protocol", zap.Error(err))
 		return cid.Undef, "", fmt.Errorf("failed to cast protocol to storage protocol: %w", err)
 	}
@@ -205,7 +202,7 @@ func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, dev
 
 	// Build dynamic updates and conflict columns using shared helper functions
 	received := true
-	updates := s.buildPendingBlobUpdates(deviceID, &streamID, blobInfo, &received, &isTerminating)
+	updates := s.buildPendingBlobUpdates(deviceID, &streamID, blobInfo, &received, &isTerminating, true, true)
 	conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, &streamID)
 
 	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
@@ -273,7 +270,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 
 	// Build dynamic updates and conflict columns using shared helper functions
 	received := true
-	updates := s.buildPendingBlobUpdates(deviceID, streamID, blobInfo, &received, &isTerminating)
+	updates := s.buildPendingBlobUpdates(deviceID, streamID, blobInfo, &received, &isTerminating, false, false)
 	conflictColumns = s.buildPendingBlobConflictColumns(isTerminating, streamID)
 
 	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
@@ -399,7 +396,7 @@ func (s *UploadServiceDefault) buildPendingBlobConflictColumns(isTerminating boo
 }
 
 // buildPendingBlobUpdates builds dynamic DoUpdates clause for pending blob operations
-func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *uint, blobInfo *stream.BlobInfo, received *bool, terminating *bool) []clause.Assignment {
+func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *uint, blobInfo *stream.BlobInfo, received *bool, terminating *bool, updateBlobNum, updateSize bool) []clause.Assignment {
 	var updates []clause.Assignment
 
 	// Always update device_id
@@ -420,10 +417,17 @@ func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *
 		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "terminating"}, Value: *terminating})
 	}
 
-	// Always update blob_size and blob_number - these are valid even when zero
-	// Length=0 is valid for terminating blobs, BlobNum=0 is valid for first blob
-	updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_size"}, Value: int(blobInfo.Length)})
-	updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_number"}, Value: blobInfo.BlobNum})
+	// Update blob_size only if requested
+	if updateSize {
+		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_size"}, Value: int(blobInfo.Length)})
+	}
+
+	// Update blob_number only if requested
+	if updateBlobNum {
+		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_number"}, Value: blobInfo.BlobNum})
+	}
+
+	// Always update IV data if present
 	if blobInfo.IV != nil {
 		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "iv_data"}, Value: blobInfo.IV})
 	}
@@ -454,7 +458,7 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 			}
 
 			// Build dynamic updates and conflict columns using shared helper functions
-			updates := s.buildPendingBlobUpdates(deviceID, &streamID, &blobInfo, nil, &isTerminating)
+			updates := s.buildPendingBlobUpdates(deviceID, &streamID, &blobInfo, nil, &isTerminating, true, true)
 			conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, &streamID)
 
 			err := tx.Clauses(clause.OnConflict{
