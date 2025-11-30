@@ -1402,7 +1402,7 @@ func TestUploadServiceDefault_MarkPendingBlobAsReceived(t *testing.T) {
 				return pendingStream.ID, nil
 			},
 			expectError: false,
-			description: "should mark terminating blob as received with generated hash",
+			description: "should mark terminating blob as received with empty hash",
 		},
 		{
 			name:     "mark non-existent pending blob as received",

@@ -9,6 +9,7 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/samber/lo"
+	"go.lumeweb.com/liblbry/blob"
 	lbrycrypto "go.lumeweb.com/liblbry/crypto"
 	"go.lumeweb.com/liblbry/stream"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
@@ -111,6 +112,9 @@ func (s *UploadServiceDefault) HandleUpload(ctx context.Context, reader io.ReadS
 	// Cast to storage protocol with type safety
 	storageProtocol, err := util.CastToStorageProtocol(s.protocol)
 	if err != nil {
+		return cid.Undef, "", fmt.Errorf("failed to cast protocol to storage protocol: %w", err)
+	}
+	if err != nil {
 		s.logger.Error("Failed to cast protocol to storage protocol", zap.Error(err))
 		return cid.Undef, "", fmt.Errorf("failed to cast protocol to storage protocol: %w", err)
 	}
@@ -200,19 +204,21 @@ func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, dev
 		IVData:      blobInfo.IV,
 	}
 
-	// Build dynamic updates using shared helper function
+	// Build dynamic updates and conflict columns using shared helper functions
 	received := true
 	updates := s.buildPendingBlobUpdates(deviceID, &streamID, blobInfo, &received, &isTerminating)
+	conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, &streamID)
 
 	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}},
+		Columns:   conflictColumns,
 		DoUpdates: updates,
 	}).Create(&pendingBlob).Error
 
 	if err != nil {
 		s.logger.Error("Failed to create pending blob record",
 			zap.Uint("user_id", userID),
-			zap.String("blob_hash", hex.EncodeToString(blobInfo.BlobHash)),
+			zap.String("blob_hash", blobHash),
+			zap.Bool("terminating", isTerminating),
 			zap.Error(err))
 		return fmt.Errorf("failed to create pending blob record: %w", err)
 	}
@@ -227,6 +233,30 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		return fmt.Errorf("failed to generate terminating blob hash: %w", hashErr)
 	}
 
+	var streamID *uint
+	var conflictColumns []clause.Column
+
+	// For terminating blobs, we need to find the existing record to get stream_id and blob_number
+	if isTerminating {
+		terminatingHash, _, _ := s.getBlobHashFromInfo(&stream.BlobInfo{})
+		var existingBlob db.PendingBlob
+		err := s.db.WithContext(ctx).Where("user_id = ? AND blob_hash = ?",
+			userID, terminatingHash).First(&existingBlob).Error
+		if err != nil {
+			// If not found, we'll create a new record with stream_id=0 (will be updated later)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				zeroStreamID := uint(0)
+				streamID = &zeroStreamID
+			} else {
+				return fmt.Errorf("failed to find existing terminating blob: %w", err)
+			}
+		} else {
+			streamID = &existingBlob.StreamID
+			// Use the existing blob number to ensure consistency
+			blobInfo.BlobNum = existingBlob.BlobNumber
+		}
+	}
+
 	pendingBlob := db.PendingBlob{
 		BlobHash:    blobHash,
 		UserID:      userID,
@@ -238,19 +268,21 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		IVData:      blobInfo.IV,
 	}
 
-	// Build dynamic updates using shared helper function - preserve existing stream_id
+	// Build dynamic updates and conflict columns using shared helper functions
 	received := true
-	updates := s.buildPendingBlobUpdates(deviceID, nil, blobInfo, &received, &isTerminating)
+	updates := s.buildPendingBlobUpdates(deviceID, streamID, blobInfo, &received, &isTerminating)
+	conflictColumns = s.buildPendingBlobConflictColumns(isTerminating, streamID)
 
 	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}},
+		Columns:   conflictColumns,
 		DoUpdates: updates,
 	}).Create(&pendingBlob).Error
 
 	if err != nil {
 		s.logger.Error("Failed to mark pending blob as received",
 			zap.Uint("user_id", userID),
-			zap.String("blob_hash", hex.EncodeToString(blobInfo.BlobHash)),
+			zap.String("blob_hash", blobHash),
+			zap.Bool("terminating", isTerminating),
 			zap.Error(err))
 		return fmt.Errorf("failed to mark pending blob as received: %w", err)
 	}
@@ -336,12 +368,29 @@ func (s *UploadServiceDefault) getBlobHashFromInfo(blobInfo *stream.BlobInfo) (s
 	isTerminating := len(blobInfo.BlobHash) == 0
 
 	if isTerminating {
-		// Generate unique placeholder hash for terminating blob
-		hash, err := util.GenerateTerminatingBlobHash()
-		return hash, true, err
+		hash, err := blob.ComputeBlobHashBytes([]byte(internal.TerminatingBlobHash))
+		if err != nil {
+			return "", true, fmt.Errorf("failed to compute terminating blob hash: %w", err)
+		}
+		return hex.EncodeToString(hash), true, nil
 	} else {
 		// Use actual hash for non-terminating blobs
 		return hex.EncodeToString(blobInfo.BlobHash), false, nil
+	}
+}
+
+// buildPendingBlobConflictColumns builds the appropriate conflict columns based on blob type
+func (s *UploadServiceDefault) buildPendingBlobConflictColumns(isTerminating bool, streamID *uint) []clause.Column {
+	if isTerminating && streamID != nil && *streamID > 0 {
+		// For terminating blobs with valid stream_id, use composite key (user_id, stream_id, blob_number)
+		return []clause.Column{
+			{Name: "user_id"},
+			{Name: "stream_id"},
+			{Name: "blob_number"},
+		}
+	} else {
+		// For regular blobs or terminating blobs without stream_id, use (user_id, blob_hash) constraint
+		return []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}}
 	}
 }
 
@@ -367,15 +416,10 @@ func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *
 		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "terminating"}, Value: *terminating})
 	}
 
-	// Always update blob_size when we have length info
-	if blobInfo.Length > 0 {
-		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_size"}, Value: int(blobInfo.Length)})
-	}
-
-	// Conditional updates based on actual data presence
-	if blobInfo.BlobNum != 0 {
-		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_number"}, Value: blobInfo.BlobNum})
-	}
+	// Always update blob_size and blob_number - these are valid even when zero
+	// Length=0 is valid for terminating blobs, BlobNum=0 is valid for first blob
+	updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_size"}, Value: int(blobInfo.Length)})
+	updates = append(updates, clause.Assignment{Column: clause.Column{Name: "blob_number"}, Value: blobInfo.BlobNum})
 	if blobInfo.IV != nil {
 		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "iv_data"}, Value: blobInfo.IV})
 	}
@@ -405,16 +449,17 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 				IVData:      blobInfo.IV,
 			}
 
-			// Build dynamic updates using shared helper function
+			// Build dynamic updates and conflict columns using shared helper functions
 			updates := s.buildPendingBlobUpdates(deviceID, &streamID, &blobInfo, nil, &isTerminating)
+			conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, &streamID)
 
 			err := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}},
+				Columns:   conflictColumns,
 				DoUpdates: updates,
 			}).Create(&pendingBlob).Error
 
 			if err != nil {
-				return fmt.Errorf("failed to create pending blob record for %s: %w", blobHash, err)
+				return fmt.Errorf("failed to create pending blob record for %s (terminating: %v): %w", blobHash, isTerminating, err)
 			}
 		}
 		return nil

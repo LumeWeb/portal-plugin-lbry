@@ -8,6 +8,9 @@ import (
 const ProtocolName = "lbry"
 const ProtocolDisplayName = "LBRY"
 
+// TerminatingBlobHash is the deterministic sentinel value used for terminating blobs
+const TerminatingBlobHash = "TERMINATING"
+
 // readSeekCloser is a helper that implements io.ReadSeekCloser
 type readSeekCloser struct {
 	*bytes.Reader

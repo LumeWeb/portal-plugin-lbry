@@ -78,11 +78,14 @@ CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
     deleted_at TIMESTAMP NULL,
     
     UNIQUE(user_id, blob_hash),
+    UNIQUE(user_id, stream_id, blob_number),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (device_id) REFERENCES lbry_devices(id),
     FOREIGN KEY (stream_id) REFERENCES lbry_pending_streams(id) ON DELETE CASCADE
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS unique_lbry_pending_blobs_user_blob ON lbry_pending_blobs(user_id, blob_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_lbry_pending_blobs_user_stream_blob ON lbry_pending_blobs(user_id, stream_id, blob_number);
 CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_user_id ON lbry_pending_blobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_device_id ON lbry_pending_blobs(device_id);
 CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_stream_id ON lbry_pending_blobs(stream_id);

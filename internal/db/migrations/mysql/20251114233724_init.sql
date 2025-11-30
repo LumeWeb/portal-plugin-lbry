@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
     deleted_at TIMESTAMP NULL DEFAULT NULL,
     
     UNIQUE KEY unique_user_blob (user_id, blob_hash),
+    UNIQUE KEY unique_user_terminating_blob (user_id, stream_id, blob_number),
     KEY idx_pending_blobs_user_id (user_id),
     KEY idx_pending_blobs_device_id (device_id),
     KEY idx_pending_blobs_stream_id (stream_id),

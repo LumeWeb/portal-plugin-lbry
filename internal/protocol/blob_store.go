@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 
+	"go.lumeweb.com/liblbry/blob"
 	"go.lumeweb.com/liblbry/stream"
 	pluginDb "go.lumeweb.com/portal-plugin-lbry/internal/db"
 	"go.lumeweb.com/portal/core"
@@ -21,6 +22,75 @@ import (
 )
 
 const BLOBSTORE_NAME = "sia"
+
+// convertToStorageHash converts LBRY hash to storage hash with consistent error handling
+func (bs *BlobStore) convertToStorageHash(hash string) (core.StorageHash, error) {
+	storageHash, err := internal.LBRYHashToStorageHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse storage hash for blob %q: %w", hash, err)
+	}
+	return storageHash, nil
+}
+
+// isTerminatingBlob checks if a hash represents a terminating blob
+func (bs *BlobStore) isTerminatingBlob(hash string) bool {
+	return hash == ""
+}
+
+// getTerminatingBlobHash generates the deterministic terminating blob hash
+func (bs *BlobStore) getTerminatingBlobHash() string {
+	hash, err := blob.ComputeBlobHashBytes([]byte(internal.TerminatingBlobHash))
+	if err != nil {
+		// This should never happen, but if it does, return empty string as fallback
+		return ""
+	}
+	return hex.EncodeToString(hash)
+}
+
+// closeReaderSafely safely closes a reader if it implements io.Closer
+func (bs *BlobStore) closeReaderSafely(reader io.Reader) {
+	if closer, ok := reader.(io.Closer); ok {
+		_ = closer.Close()
+	}
+}
+
+// upsertBlobRecord performs a standardized blob upsert operation
+func (bs *BlobStore) upsertBlobRecord(ctx context.Context, tx *gorm.DB, blob pluginDb.Blob) error {
+	db := tx
+	if db == nil {
+		db = bs.db.WithContext(ctx)
+	} else {
+		db = db.WithContext(ctx)
+	}
+
+	// For updates, preserve existing IV data if the new blob doesn't have IV data
+	// This prevents nuking IV data when blobs are updated without IV information
+	doUpdates := clause.Set{
+		{Column: clause.Column{Name: "blob_size"}, Value: blob.BlobSize},
+		{Column: clause.Column{Name: "terminating"}, Value: blob.Terminating},
+	}
+
+	// Only update IV data if it's provided (non-nil and non-empty)
+	if len(blob.IVData) > 0 {
+		doUpdates = append(doUpdates, clause.Set{
+			{Column: clause.Column{Name: "iv_data"}, Value: blob.IVData},
+		}...)
+	}
+
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "blob_hash"}},
+		DoUpdates: doUpdates,
+	}).Create(&blob).Error
+}
+
+// validateBlob checks if a blob is valid for processing
+func (bs *BlobStore) validateBlob(blob pluginDb.Blob) bool {
+	// Skip invalid blobs (no hash or no IV) - these are essential for blob validity
+	if (len(blob.BlobHash) == 0 || len(blob.IVData) == 0) && blob.BlobSize > 0 && !blob.Terminating {
+		return false
+	}
+	return true
+}
 
 // BlobStore implements the storage.BlobStore interface for LBRY protocol
 type BlobStore struct {
@@ -60,10 +130,10 @@ func (bs *BlobStore) Has(ctx context.Context, hash string) (bool, error) {
 
 	// If we have metadata, check if the actual data exists in storage
 	if count > 0 {
-		// Parse the storage hash
-		storageHash, err := internal.LBRYHashToStorageHash(hash)
+		// Parse the storage hash using helper
+		storageHash, err := bs.convertToStorageHash(hash)
 		if err != nil {
-			return false, fmt.Errorf("failed to parse storage hash for blob %q: %w", hash, err)
+			return false, err
 		}
 
 		// Try to download the object to verify it exists
@@ -74,12 +144,8 @@ func (bs *BlobStore) Has(ctx context.Context, hash string) (bool, error) {
 			return false, nil
 		}
 
-		// Properly close the reader to prevent resource leaks
-		func() {
-			if closer, ok := reader.(io.Closer); ok {
-				_ = closer.Close()
-			}
-		}()
+		// Properly close the reader using helper
+		defer bs.closeReaderSafely(reader)
 
 		return true, nil
 	}
@@ -164,10 +230,8 @@ func (bs *BlobStore) getSDBlob(ctx context.Context, _stream *pluginDb.Stream, ha
 
 // getRegularBlob handles regular blob retrieval
 func (bs *BlobStore) getRegularBlob(ctx context.Context, hash string) ([]byte, error) {
-	// Check if this is a terminating blob (empty hash)
-	isTerminating := hash == ""
-
-	if isTerminating {
+	// Check if this is a terminating blob using helper
+	if bs.isTerminatingBlob(hash) {
 		bs.logger.Debug("Handling terminating blob",
 			zap.String("blob_hash", hash))
 		// Return empty data for terminating blobs (consistent with reflector store behavior)
@@ -185,10 +249,10 @@ func (bs *BlobStore) getRegularBlob(ctx context.Context, hash string) ([]byte, e
 		return nil, fmt.Errorf("blob %q not found in local storage", hash)
 	}
 
-	// Parse the storage hash
-	storageHash, err := internal.LBRYHashToStorageHash(hash)
+	// Parse the storage hash using helper
+	storageHash, err := bs.convertToStorageHash(hash)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse storage hash for blob %q: %w", hash, err)
+		return nil, err
 	}
 
 	// Try to download the blob data from storage
@@ -197,12 +261,8 @@ func (bs *BlobStore) getRegularBlob(ctx context.Context, hash string) ([]byte, e
 		return nil, fmt.Errorf("failed to download blob %q: %w", hash, err)
 	}
 
-	// Ensure the reader is closed
-	defer func() {
-		if closer, ok := rc.(io.Closer); ok {
-			_ = closer.Close()
-		}
-	}()
+	// Ensure the reader is closed using helper
+	defer bs.closeReaderSafely(rc)
 
 	// Read all data from the reader
 	b, err := io.ReadAll(rc)
@@ -220,12 +280,29 @@ func (bs *BlobStore) hasBlobMetadata(ctx context.Context, hash string) (int64, e
 	return count, err
 }
 
-// Put stores a blob with the given hash and data
-func (bs *BlobStore) Put(ctx context.Context, hash string, data []byte) error {
-	// Convert the hash using stream.ToMultihash
-	sh, err := internal.LBRYHashToStorageHash(hash)
+// putBlobData handles the common logic for storing blob data and metadata
+func (bs *BlobStore) putBlobData(ctx context.Context, hash string, data []byte, isTerminating bool) error {
+	if isTerminating {
+		// Generate deterministic terminating blob hash for consistent storage
+		terminatingHash := bs.getTerminatingBlobHash()
+		bs.logger.Debug("Handling terminating blob",
+			zap.String("original_hash", hash),
+			zap.String("terminating_hash", terminatingHash))
+
+		// For terminating blobs, NOP storage operation and create database record with deterministic hash
+		_blob := pluginDb.Blob{
+			BlobHash:    terminatingHash,
+			BlobSize:    0, // Terminating blobs have no data
+			Terminating: true,
+		}
+
+		return bs.upsertBlobRecord(ctx, nil, _blob)
+	}
+
+	// Convert the hash using helper
+	sh, err := bs.convertToStorageHash(hash)
 	if err != nil {
-		return fmt.Errorf("failed to convert hash %q: %w", hash, err)
+		return err
 	}
 
 	// Store the blob data using the storage service
@@ -239,18 +316,21 @@ func (bs *BlobStore) Put(ctx context.Context, hash string, data []byte) error {
 		return fmt.Errorf("failed to store blob %q: %w", hash, err)
 	}
 
-	// Update or create blob metadata in the database
+	// Update or create blob metadata in the database using helper
 	_blob := pluginDb.Blob{
-		BlobHash: hash,
-		BlobSize: len(data),
+		BlobHash:    hash,
+		BlobSize:    len(data),
+		Terminating: false,
 	}
 
-	return bs.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "blob_hash"}},
-		DoUpdates: clause.Set{
-			{Column: clause.Column{Name: "blob_size"}, Value: _blob.BlobSize},
-		},
-	}).Create(&_blob).Error
+	return bs.upsertBlobRecord(ctx, nil, _blob)
+}
+
+// Put stores a blob with the given hash and data
+func (bs *BlobStore) Put(ctx context.Context, hash string, data []byte) error {
+	// Check if this is a terminating blob using helper
+	isTerminating := bs.isTerminatingBlob(hash)
+	return bs.putBlobData(ctx, hash, data, isTerminating)
 }
 
 // processStreamBlobs handles the creation/update of stream blob associations
@@ -258,35 +338,35 @@ func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blob
 	return bs.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Process each blob in the stream
 		for _, blobInfo := range blobInfos {
-			// Convert blob hash bytes to string
-			blobHash := hex.EncodeToString(blobInfo.BlobHash)
+			var blobHash string
+			var isTerminating bool
 
-			// Create or update blob record
 			// Determine if this is a terminating blob (empty hash)
-			isTerminating := len(blobInfo.BlobHash) == 0
+			if len(blobInfo.BlobHash) == 0 {
+				// Generate deterministic terminating blob hash
+				blobHash = bs.getTerminatingBlobHash()
+				isTerminating = true
+			} else {
+				// Convert blob hash bytes to string
+				blobHash = hex.EncodeToString(blobInfo.BlobHash)
+				isTerminating = false
+			}
 
-			blob := pluginDb.Blob{
+			_blob := pluginDb.Blob{
 				BlobHash:    blobHash,
 				BlobSize:    int(blobInfo.Length),
 				IVData:      blobInfo.IV,
 				Terminating: isTerminating,
 			}
 
-			err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "blob_hash"}},
-				DoUpdates: clause.Set{
-					{Column: clause.Column{Name: "blob_size"}, Value: blob.BlobSize},
-					{Column: clause.Column{Name: "iv_data"}, Value: blob.IVData},
-					{Column: clause.Column{Name: "terminating"}, Value: blob.Terminating},
-				},
-			}).Create(&blob).Error
-
+			// Use helper for upsert operation
+			err := bs.upsertBlobRecord(ctx, tx, _blob)
 			if err != nil {
 				return fmt.Errorf("failed to upsert blob %q: %w", blobHash, err)
 			}
 
 			// Reload the blob to get the ID after upsert
-			err = tx.Where("blob_hash = ?", blobHash).First(&blob).Error
+			err = tx.Where("blob_hash = ?", blobHash).First(&_blob).Error
 			if err != nil {
 				return fmt.Errorf("failed to reload blob %q: %w", blobHash, err)
 			}
@@ -294,7 +374,7 @@ func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blob
 			// Create stream blob association
 			streamBlob := pluginDb.StreamBlob{
 				StreamID:   uint64(streamID),
-				BlobID:     uint64(blob.ID),
+				BlobID:     uint64(_blob.ID),
 				BlobNumber: blobInfo.BlobNum,
 			}
 
@@ -336,8 +416,8 @@ func (bs *BlobStore) buildBlobInfosFromDb(ctx context.Context, streamID uint) ([
 	maxBlobNumber := -1
 	for _, streamBlob := range streamBlobs {
 		// Get the blob details
-		var blob pluginDb.Blob
-		err = bs.db.WithContext(ctx).Where("id = ?", streamBlob.BlobID).First(&blob).Error
+		var _blob pluginDb.Blob
+		err = bs.db.WithContext(ctx).Where("id = ?", streamBlob.BlobID).First(&_blob).Error
 		if err != nil {
 			// For missing blobs, create a placeholder blob info with empty data
 			// This allows SD blob serialization to continue even with missing associated blobs
@@ -361,20 +441,20 @@ func (bs *BlobStore) buildBlobInfosFromDb(ctx context.Context, streamID uint) ([
 			continue
 		}
 
-		// Skip invalid blobs (no hash or no IV) - these are essential for blob validity
-		if (len(blob.BlobHash) == 0 || len(blob.IVData) == 0) && blob.BlobSize > 0 {
+		// Skip invalid blobs using helper
+		if !bs.validateBlob(_blob) {
 			bs.logger.Debug("Skipping invalid blob for stream",
 				zap.Uint64("blob_id", streamBlob.BlobID),
 				zap.Uint64("stream_id", uint64(streamID)),
-				zap.String("blob_hash", blob.BlobHash),
-				zap.Int("blob_size", blob.BlobSize),
-				zap.Int("iv_length", len(blob.IVData)))
+				zap.String("blob_hash", _blob.BlobHash),
+				zap.Int("blob_size", _blob.BlobSize),
+				zap.Int("iv_length", len(_blob.IVData)))
 			continue
 		}
 
 		validStreamBlobs = append(validStreamBlobs, validStreamBlob{
 			streamBlob: streamBlob,
-			blob:       blob,
+			blob:       _blob,
 		})
 		if streamBlob.BlobNumber > maxBlobNumber {
 			maxBlobNumber = streamBlob.BlobNumber
@@ -384,43 +464,43 @@ func (bs *BlobStore) buildBlobInfosFromDb(ctx context.Context, streamID uint) ([
 	// Now process the valid blobs with the terminating empty blob logic
 	for _, validBlob := range validStreamBlobs {
 		streamBlob := validBlob.streamBlob
-		blob := validBlob.blob
+		_blob := validBlob.blob
 
 		// Skip empty blobs unless they are marked as terminating
-		if blob.BlobSize == 0 && !blob.Terminating {
+		if _blob.BlobSize == 0 && !_blob.Terminating {
 			bs.logger.Debug("Skipping non-terminating empty blob for stream",
 				zap.Uint64("blob_id", streamBlob.BlobID),
 				zap.Uint64("stream_id", uint64(streamID)),
-				zap.String("blob_hash", blob.BlobHash),
-				zap.Int("blob_size", blob.BlobSize),
+				zap.String("blob_hash", _blob.BlobHash),
+				zap.Int("blob_size", _blob.BlobSize),
 				zap.Int("blob_number", streamBlob.BlobNumber),
-				zap.Bool("terminating", blob.Terminating))
+				zap.Bool("terminating", _blob.Terminating))
 			continue
 		}
 
 		// Create BlobInfo with the stored data
 		// For terminating blobs, always use empty hash in blob lists
 		var blobHashBytes []byte
-		if blob.Terminating {
+		if _blob.Terminating {
 			// Terminating blobs always have empty hash in blob lists
 			blobHashBytes = []byte{}
-		} else if len(blob.BlobHash) > 0 {
+		} else if len(_blob.BlobHash) > 0 {
 			// Convert the hex string hash to bytes for non-terminating blobs
 			var err error
-			blobHashBytes, err = hex.DecodeString(blob.BlobHash)
+			blobHashBytes, err = hex.DecodeString(_blob.BlobHash)
 			if err != nil {
 				bs.logger.Warn("Failed to decode blob hash from hex string",
-					zap.String("blob_hash", blob.BlobHash),
+					zap.String("blob_hash", _blob.BlobHash),
 					zap.Uint64("blob_id", streamBlob.BlobID),
 					zap.Error(err))
 				continue
 			}
 		}
 		blobInfo := stream.BlobInfo{
-			Length:   blob.BlobSize,
+			Length:   _blob.BlobSize,
 			BlobNum:  streamBlob.BlobNumber,
 			BlobHash: blobHashBytes,
-			IV:       blob.IVData, // Use stored IV from database
+			IV:       _blob.IVData, // Use stored IV from database
 		}
 		blobInfos = append(blobInfos, blobInfo)
 	}
@@ -514,10 +594,10 @@ func (bs *BlobStore) List(ctx context.Context, offset, limit int) ([]string, err
 
 // Delete removes a blob by its hash
 func (bs *BlobStore) Delete(ctx context.Context, hash string) error {
-	// Parse the storage hash
-	storageHash, err := internal.LBRYHashToStorageHash(hash)
+	// Parse the storage hash using helper
+	storageHash, err := bs.convertToStorageHash(hash)
 	if err != nil {
-		return fmt.Errorf("failed to parse storage hash for blob %q: %w", hash, err)
+		return err
 	}
 
 	// Delete the blob data from storage

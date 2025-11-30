@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.lumeweb.com/liblbry/blob"
 	"go.lumeweb.com/liblbry/stream"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
@@ -1030,6 +1031,43 @@ func TestLBRYBlobStore_Put_LargeBlob(t *testing.T) {
 		ast.Equal(len(largeData), blob.BlobSize)
 
 		// No need to call mockStorage.AssertExpectations(tb)
+	})
+}
+
+func TestLBRYBlobStore_Put_TerminatingBlob(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		ast := assert.New(tb)
+		store, err := NewLBRYBlobStore(ctx)
+		require.NoError(tb, err)
+
+		// Create a mock storage service
+		mockStorage := coreMocks.NewMockStorageService(tb)
+		store.storageSvc = mockStorage
+
+		// Set up mock expectations - storage should NOT be called for terminating blob
+
+		// Act - Put terminating blob with empty hash and no data
+		err = store.Put(t.Context(), "", []byte{})
+
+		// Assert
+		ast.NoError(err)
+
+		// Calculate expected terminating blob hash
+		expectedTerminatingHash, err := blob.ComputeBlobHashBytes([]byte(internal.TerminatingBlobHash))
+		require.NoError(tb, err)
+		expectedTerminatingHashStr := hex.EncodeToString(expectedTerminatingHash)
+
+		// Check that blob was inserted into DB with correct properties
+		var blob db.Blob
+		err = ctx.DB().Where("blob_hash = ?", expectedTerminatingHashStr).First(&blob).Error
+		ast.NoError(err)
+		ast.Equal(expectedTerminatingHashStr, blob.BlobHash)
+		ast.Equal(0, blob.BlobSize)
+		ast.True(blob.Terminating)
+
+		// Verify storage was NOT called for terminating blob
+		mockStorage.AssertNotCalled(tb, "UploadObject")
 	})
 }
 
