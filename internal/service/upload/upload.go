@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/ipfs/go-cid"
 	"github.com/samber/lo"
@@ -237,14 +238,40 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		if result.Error != nil {
 			return fmt.Errorf("failed to update pending blob: %w", result.Error)
 		}
+		if result.RowsAffected == 0 {
+			return fmt.Errorf("no pending blob matched for update")
+		}
 		return nil
+	}
+
+	// Helper function to detect duplicate key/conflict errors
+	isDuplicateKeyError := func(err error) bool {
+		if err == nil {
+			return false
+		}
+
+		// Check for GORM wrapped errors
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			return true
+		}
+
+		// Check error message patterns for common duplicate key errors
+		errMsg := err.Error()
+		return strings.Contains(errMsg, "duplicate") ||
+			strings.Contains(errMsg, "UNIQUE constraint failed") ||
+			strings.Contains(errMsg, "unique constraint")
 	}
 
 	// Helper function to create new record with fallback to update
 	createWithFallback := func(pendingBlob db.PendingBlob, updates map[string]any) error {
 		err := s.db.WithContext(ctx).Create(&pendingBlob).Error
 		if err != nil {
-			return updateExisting(pendingBlob.BlobHash, pendingBlob.BlobNumber, pendingBlob.StreamID, updates)
+			// Check if this is a duplicate key/conflict error
+			if isDuplicateKeyError(err) {
+				return updateExisting(pendingBlob.BlobHash, pendingBlob.BlobNumber, pendingBlob.StreamID, updates)
+			}
+			// For all other errors, return the original error immediately
+			return err
 		}
 		return nil
 	}
@@ -315,17 +342,21 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		"received":  true,
 		"device_id": deviceID,
 		"blob_size": blobInfo.Length,
-		"iv_data":   blobInfo.IV,
+	}
+
+	// Only include IV data in updates if it's not nil to preserve existing IV data
+	if blobInfo.IV != nil {
+		updates["iv_data"] = blobInfo.IV
+	}
+
+	// Add blob_number if we have a valid one from blobInfo
+	if blobInfo.BlobNum > 0 {
+		updates["blob_number"] = blobInfo.BlobNum
 	}
 
 	if len(existingBlobs) > 0 {
 		// Update existing records using their unique keys
 		for _, existingBlob := range existingBlobs {
-			// Only update blob_number if we have a valid one from blobInfo
-			if blobInfo.BlobNum > 0 {
-				updates["blob_number"] = blobInfo.BlobNum
-			}
-
 			if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updates); err != nil {
 				return err
 			}
