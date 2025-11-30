@@ -238,21 +238,54 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		terminatingHash, _, _ := s.getBlobHashFromInfo(&stream.BlobInfo{})
 
 		// Update all terminating blobs for this user to mark them as received
-		err := s.db.WithContext(ctx).Model(&db.PendingBlob{}).
+		result := s.db.WithContext(ctx).Model(&db.PendingBlob{}).
 			Where("user_id = ? AND blob_hash = ? AND received = ?", userID, terminatingHash, false).
 			Updates(map[string]interface{}{
 				"received":  true,
 				"device_id": deviceID,
-			}).Error
+			})
 
-		if err != nil {
-			return fmt.Errorf("failed to update terminating blobs: %w", err)
+		if result.Error != nil {
+			return fmt.Errorf("failed to update terminating blobs: %w", result.Error)
 		}
 
-		// For terminating blobs, we don't need to create a new record since we've updated all existing ones
-		s.logger.Debug("Updated all terminating blobs as received",
-			zap.Uint("user_id", userID),
-			zap.String("terminating_hash", terminatingHash))
+		// If no terminating blobs were updated, create a new one
+		if result.RowsAffected == 0 {
+			pendingBlob := db.PendingBlob{
+				BlobHash:    terminatingHash,
+				UserID:      userID,
+				DeviceID:    deviceID,
+				StreamID:    0, // Default to 0 since streamID is not available in this context
+				BlobSize:    int(blobInfo.Length),
+				BlobNumber:  blobInfo.BlobNum,
+				Received:    true, // Mark as received when storing
+				Terminating: true,
+				IVData:      blobInfo.IV,
+			}
+
+			// Build dynamic updates and conflict columns using shared helper functions
+			received := true
+			updates := s.buildPendingBlobUpdates(deviceID, nil, blobInfo, &received, &isTerminating, false, false)
+			conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, nil)
+
+			err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+				Columns:   conflictColumns,
+				DoUpdates: updates,
+			}).Create(&pendingBlob).Error
+
+			if err != nil {
+				return fmt.Errorf("failed to create terminating blob: %w", err)
+			}
+
+			s.logger.Debug("Created new terminating blob as received",
+				zap.Uint("user_id", userID),
+				zap.String("terminating_hash", terminatingHash))
+		} else {
+			s.logger.Debug("Updated all terminating blobs as received",
+				zap.Uint("user_id", userID),
+				zap.String("terminating_hash", terminatingHash))
+		}
+
 		return nil
 	}
 

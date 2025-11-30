@@ -148,13 +148,17 @@ func TestReflectorStore_Put(t *testing.T) {
 		store.uploadSvc = mockUploadService
 
 		testData := []byte("test reflector blob data")
-		testHash := "test_hash_123"
+		testHash := "a2f1841bb9c5f3b583ac3b8c07ee1a5bf9cc48923721c30d5ca6318615776c284e8936d72fa4db7fdda2e4e9598b1e6c"
 		userID := uint(123)
 		testIPAddress := "192.168.1.100"
 
 		// Set up mock expectations
 		mockStorage.EXPECT().S3TemporaryUpload(mock.Anything, mock.Anything, mock.AnythingOfType("uint64"), mock.Anything, mock.AnythingOfType("func(*core.S3TempUploadOptions)")).
 			Return("upload_id_123", nil).Once()
+
+		// Set up mock expectation for MarkPendingBlobAsReceived
+		mockUploadService.EXPECT().MarkPendingBlobAsReceived(mock.Anything, userID, uint(1), mock.AnythingOfType("*stream.BlobInfo")).
+			Return(nil).Once()
 
 		testDevice := &pluginDb.Device{
 			Model: gorm.Model{
