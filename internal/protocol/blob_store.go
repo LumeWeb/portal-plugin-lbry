@@ -164,6 +164,16 @@ func (bs *BlobStore) getSDBlob(ctx context.Context, _stream *pluginDb.Stream, ha
 
 // getRegularBlob handles regular blob retrieval
 func (bs *BlobStore) getRegularBlob(ctx context.Context, hash string) ([]byte, error) {
+	// Check if this is a terminating blob (empty hash)
+	isTerminating := hash == ""
+
+	if isTerminating {
+		bs.logger.Debug("Handling terminating blob",
+			zap.String("blob_hash", hash))
+		// Return empty data for terminating blobs (consistent with reflector store behavior)
+		return []byte{}, nil
+	}
+
 	// First check if we have metadata in our database
 	count, err := bs.hasBlobMetadata(ctx, hash)
 	if err != nil {
@@ -252,10 +262,14 @@ func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blob
 			blobHash := hex.EncodeToString(blobInfo.BlobHash)
 
 			// Create or update blob record
+			// Determine if this is a terminating blob (empty hash)
+			isTerminating := len(blobInfo.BlobHash) == 0
+
 			blob := pluginDb.Blob{
-				BlobHash: blobHash,
-				BlobSize: int(blobInfo.Length),
-				IVData:   blobInfo.IV,
+				BlobHash:    blobHash,
+				BlobSize:    int(blobInfo.Length),
+				IVData:      blobInfo.IV,
+				Terminating: isTerminating,
 			}
 
 			err := tx.Clauses(clause.OnConflict{
@@ -263,6 +277,7 @@ func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blob
 				DoUpdates: clause.Set{
 					{Column: clause.Column{Name: "blob_size"}, Value: blob.BlobSize},
 					{Column: clause.Column{Name: "iv_data"}, Value: blob.IVData},
+					{Column: clause.Column{Name: "terminating"}, Value: blob.Terminating},
 				},
 			}).Create(&blob).Error
 
@@ -371,22 +386,26 @@ func (bs *BlobStore) buildBlobInfosFromDb(ctx context.Context, streamID uint) ([
 		streamBlob := validBlob.streamBlob
 		blob := validBlob.blob
 
-		// Skip empty blobs unless they are the terminating blob (highest blob number)
-		if blob.BlobSize == 0 && streamBlob.BlobNumber != maxBlobNumber {
+		// Skip empty blobs unless they are marked as terminating
+		if blob.BlobSize == 0 && !blob.Terminating {
 			bs.logger.Debug("Skipping non-terminating empty blob for stream",
 				zap.Uint64("blob_id", streamBlob.BlobID),
 				zap.Uint64("stream_id", uint64(streamID)),
 				zap.String("blob_hash", blob.BlobHash),
 				zap.Int("blob_size", blob.BlobSize),
 				zap.Int("blob_number", streamBlob.BlobNumber),
-				zap.Int("max_blob_number", maxBlobNumber))
+				zap.Bool("terminating", blob.Terminating))
 			continue
 		}
 
 		// Create BlobInfo with the stored data
-		// Convert the hex string hash to bytes properly
+		// For terminating blobs, always use empty hash in blob lists
 		var blobHashBytes []byte
-		if len(blob.BlobHash) > 0 {
+		if blob.Terminating {
+			// Terminating blobs always have empty hash in blob lists
+			blobHashBytes = []byte{}
+		} else if len(blob.BlobHash) > 0 {
+			// Convert the hex string hash to bytes for non-terminating blobs
 			var err error
 			blobHashBytes, err = hex.DecodeString(blob.BlobHash)
 			if err != nil {

@@ -39,6 +39,9 @@ type UploadService interface {
 	// GetMissingBlobs checks which required blobs are not available
 	GetMissingBlobs(ctx context.Context, userID uint, streamID uint, requiredBlobs []string) ([]string, error)
 
+	// GetPendingBlobCount returns the count of pending blobs for a stream
+	GetPendingBlobCount(ctx context.Context, userID uint, streamID uint) (int64, error)
+
 	// CleanupPendingBlobs removes pending blob records after successful assembly
 	CleanupPendingBlobs(ctx context.Context, userID uint, streamResult *stream.StreamResult) error
 
@@ -47,6 +50,9 @@ type UploadService interface {
 
 	// GetPendingBlobs retrieves pending blobs for a given SD hash
 	GetPendingBlobs(ctx context.Context, userID uint, sdHash string) ([]*db.PendingBlob, error)
+
+	// MarkPendingBlobAsReceived marks an existing pending blob as received without changing other fields
+	MarkPendingBlobAsReceived(ctx context.Context, userID, deviceID uint, blobInfo *stream.BlobInfo) error
 }
 
 // Upload service name

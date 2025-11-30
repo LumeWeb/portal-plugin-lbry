@@ -244,6 +244,28 @@ func (rs *ReflectorStore) Put(ctx context.Context, hash string, data []byte) err
 		return fmt.Errorf("user ID not found in context for ReflectorStore Put operation")
 	}
 
+	// Check if this is a terminating blob (empty hash)
+	isTerminating := rs.isTerminatingBlob(userID, hash)
+
+	if isTerminating {
+		rs.logger.Debug("Skipping storage for terminating blob, but marking as received",
+			zap.String("blob_hash", hash),
+			zap.Uint("user_id", userID))
+
+		// For terminating blobs, skip storage but still mark as received
+		err := rs.markBlobAsReceived(ctx, userID, hash, int64(len(data)))
+		if err != nil {
+			rs.logger.Warn("Failed to mark terminating blob as received in pending records",
+				zap.String("blob_hash", hash),
+				zap.Uint("user_id", userID),
+				zap.Error(err))
+			// Don't fail the operation - just the tracking failed
+			return nil
+		}
+
+		return nil
+	}
+
 	// Store the blob data using the storage service's temporary upload
 	uploadID, err := rs.storageSvc.S3TemporaryUpload(ctx, internal.NewReadSeekCloser(data), uint64(len(data)), rs.proto, core.WithS3TempUploadID(getReflectorBlobPath(userID, hash)))
 	if err != nil {
@@ -255,6 +277,17 @@ func (rs *ReflectorStore) Put(ctx context.Context, hash string, data []byte) err
 		zap.String("upload_id", uploadID),
 		zap.Uint("user_id", userID),
 		zap.Int("blob_size", len(data)))
+
+	// Update pending blob record to mark as received
+	err = rs.markBlobAsReceived(ctx, userID, hash, int64(len(data)))
+	if err != nil {
+		rs.logger.Warn("Failed to mark blob as received in pending records",
+			zap.String("blob_hash", hash),
+			zap.Uint("user_id", userID),
+			zap.Error(err))
+		// Don't fail the upload operation - the blob is stored, just the tracking failed
+		return nil
+	}
 
 	return nil
 }
@@ -375,4 +408,48 @@ func (rs *ReflectorStore) extractDeviceIDFromContext(ctx context.Context) (uint,
 	}
 
 	return device.ID, nil
+}
+
+// markBlobAsReceived updates the pending blob record to mark it as received
+// This handles race conditions by only setting Received=true and never setting it back to false
+func (rs *ReflectorStore) markBlobAsReceived(ctx context.Context, userID uint, blobHash string, blobSize int64) error {
+	// Get device ID for the update
+	deviceID, err := rs.extractDeviceIDFromContext(ctx)
+	if err != nil {
+		// If we can't get device ID, we can still update the received status
+		deviceID = 0
+		rs.logger.Debug("Could not extract device ID for pending blob update, using placeholder",
+			zap.Uint("user_id", userID),
+			zap.String("blob_hash", blobHash),
+			zap.Error(err))
+	}
+
+	// Create blob info for the update - we need to decode the hash first
+	var blobHashBytes []byte
+	if blobHash != "" {
+		blobHashBytes, err = hex.DecodeString(blobHash)
+		if err != nil {
+			return fmt.Errorf("failed to decode blob hash %q: %w", blobHash, err)
+		}
+	}
+
+	blobInfo := &lbrystream.BlobInfo{
+		BlobHash: blobHashBytes,
+		Length:   int(blobSize),
+		BlobNum:  0,   // We don't know the blob number at this point, will be preserved if exists
+		IV:       nil, // IV data will be preserved if exists
+	}
+
+	// Use upload service to mark as received with race-safe upsert
+	err = rs.uploadSvc.MarkPendingBlobAsReceived(ctx, userID, deviceID, blobInfo)
+	if err != nil {
+		return fmt.Errorf("failed to mark blob %q as received: %w", blobHash, err)
+	}
+
+	rs.logger.Debug("Successfully marked blob as received",
+		zap.String("blob_hash", blobHash),
+		zap.Uint("user_id", userID),
+		zap.Uint("device_id", deviceID))
+
+	return nil
 }

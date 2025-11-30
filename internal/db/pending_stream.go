@@ -23,6 +23,9 @@ type PendingStream struct {
 	// KeyData contains the encryption key data
 	KeyData []byte
 
+	// TotalBlobs is the total number of blobs in this stream
+	TotalBlobs int
+
 	// UserID is the owner of this pending stream
 	UserID uint
 

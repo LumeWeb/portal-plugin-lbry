@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS lbry_blobs (
     blob_hash CHAR(96) NOT NULL UNIQUE,
     blob_size INT NOT NULL,
     iv_data LONGBLOB,
+    terminating BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS lbry_pending_streams (
     stream_type VARCHAR(50) DEFAULT 'lbryfile',
     suggested_file_name TEXT,
     key_data LONGBLOB,
+    total_blobs INT NOT NULL DEFAULT 0,
     user_id BIGINT UNSIGNED NOT NULL,
     device_id BIGINT UNSIGNED,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -93,6 +95,7 @@ CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
     blob_size INT,
     blob_number INT NOT NULL DEFAULT 0,
     received BOOLEAN NOT NULL DEFAULT FALSE,
+    terminating BOOLEAN NOT NULL DEFAULT FALSE,
     iv_data LONGBLOB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
