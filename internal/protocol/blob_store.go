@@ -13,7 +13,6 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
 
-	"go.lumeweb.com/liblbry/blob"
 	"go.lumeweb.com/liblbry/stream"
 	pluginDb "go.lumeweb.com/portal-plugin-lbry/internal/db"
 	"go.lumeweb.com/portal/core"
@@ -35,16 +34,6 @@ func (bs *BlobStore) convertToStorageHash(hash string) (core.StorageHash, error)
 // isTerminatingBlob checks if a hash represents a terminating blob
 func (bs *BlobStore) isTerminatingBlob(hash string) bool {
 	return hash == ""
-}
-
-// getTerminatingBlobHash generates the deterministic terminating blob hash
-func (bs *BlobStore) getTerminatingBlobHash() string {
-	hash, err := blob.ComputeBlobHashBytes([]byte(internal.TerminatingBlobHash))
-	if err != nil {
-		// This should never happen, but if it does, return empty string as fallback
-		return ""
-	}
-	return hex.EncodeToString(hash)
 }
 
 // closeReaderSafely safely closes a reader if it implements io.Closer
@@ -85,7 +74,8 @@ func (bs *BlobStore) upsertBlobRecord(ctx context.Context, tx *gorm.DB, blob plu
 
 // validateBlob checks if a blob is valid for processing
 func (bs *BlobStore) validateBlob(blob pluginDb.Blob) bool {
-	// Skip invalid blobs (no hash or no IV) - these are essential for blob validity
+	// Valid blobs must have both hash and IV if they contain data,
+	// unless they are terminating blobs (which have no data by design)
 	if (len(blob.BlobHash) == 0 || len(blob.IVData) == 0) && blob.BlobSize > 0 && !blob.Terminating {
 		return false
 	}
@@ -284,7 +274,7 @@ func (bs *BlobStore) hasBlobMetadata(ctx context.Context, hash string) (int64, e
 func (bs *BlobStore) putBlobData(ctx context.Context, hash string, data []byte, isTerminating bool) error {
 	if isTerminating {
 		// Generate deterministic terminating blob hash for consistent storage
-		terminatingHash := bs.getTerminatingBlobHash()
+		terminatingHash := internal.GetTerminatingBlobHash()
 		bs.logger.Debug("Handling terminating blob",
 			zap.String("original_hash", hash),
 			zap.String("terminating_hash", terminatingHash))
@@ -344,7 +334,7 @@ func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blob
 			// Determine if this is a terminating blob (empty hash)
 			if len(blobInfo.BlobHash) == 0 {
 				// Generate deterministic terminating blob hash
-				blobHash = bs.getTerminatingBlobHash()
+				blobHash = internal.GetTerminatingBlobHash()
 				isTerminating = true
 			} else {
 				// Convert blob hash bytes to string

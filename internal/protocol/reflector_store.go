@@ -222,12 +222,7 @@ func (rs *ReflectorStore) isTerminatingBlob(userID uint, hash string) bool {
 
 // getTerminatingBlobHash generates a deterministic terminating blob hash
 func (rs *ReflectorStore) getTerminatingBlobHash() string {
-	hash, err := blob.ComputeBlobHashBytes([]byte(internal.TerminatingBlobHash))
-	if err != nil {
-		// This should never happen, but if it does, return empty string as fallback
-		return ""
-	}
-	return hex.EncodeToString(hash)
+	return internal.GetTerminatingBlobHash()
 }
 
 // Get retrieves a blob by its hash from temporary storage

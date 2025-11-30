@@ -236,31 +236,35 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 	var streamID *uint
 	var conflictColumns []clause.Column
 
-	// For terminating blobs, we need to find the existing record to get stream_id and blob_number
+	// For terminating blobs, update all pending terminating blobs for the user
+	// since they all have the same hash and serve the same purpose
 	if isTerminating {
 		terminatingHash, _, _ := s.getBlobHashFromInfo(&stream.BlobInfo{})
-		var existingBlob db.PendingBlob
-		err := s.db.WithContext(ctx).Where("user_id = ? AND blob_hash = ?",
-			userID, terminatingHash).First(&existingBlob).Error
+
+		// Update all terminating blobs for this user to mark them as received
+		err := s.db.WithContext(ctx).Model(&db.PendingBlob{}).
+			Where("user_id = ? AND blob_hash = ? AND received = ?", userID, terminatingHash, false).
+			Updates(map[string]interface{}{
+				"received":  true,
+				"device_id": deviceID,
+			}).Error
+
 		if err != nil {
-			// If not found, we'll create a new record with stream_id=0 (will be updated later)
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				zeroStreamID := uint(0)
-				streamID = &zeroStreamID
-			} else {
-				return fmt.Errorf("failed to find existing terminating blob: %w", err)
-			}
-		} else {
-			streamID = &existingBlob.StreamID
-			// Use the existing blob number to ensure consistency
-			blobInfo.BlobNum = existingBlob.BlobNumber
+			return fmt.Errorf("failed to update terminating blobs: %w", err)
 		}
+
+		// For terminating blobs, we don't need to create a new record since we've updated all existing ones
+		s.logger.Debug("Updated all terminating blobs as received",
+			zap.Uint("user_id", userID),
+			zap.String("terminating_hash", terminatingHash))
+		return nil
 	}
 
 	pendingBlob := db.PendingBlob{
 		BlobHash:    blobHash,
 		UserID:      userID,
 		DeviceID:    deviceID,
+		StreamID:    0, // Default to 0 since streamID is not available in this context
 		BlobSize:    int(blobInfo.Length),
 		BlobNumber:  blobInfo.BlobNum,
 		Received:    true, // Mark as received when storing
