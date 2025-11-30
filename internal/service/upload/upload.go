@@ -229,8 +229,25 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		return fmt.Errorf("failed to generate terminating blob hash: %w", hashErr)
 	}
 
-	var streamID *uint
-	var conflictColumns []clause.Column
+	// Helper function to update existing records using the unique key (user_id, stream_id, blob_number)
+	updateExisting := func(hash string, blobNumber int, streamID uint, updates map[string]any) error {
+		result := s.db.WithContext(ctx).Model(&db.PendingBlob{}).
+			Where("user_id = ? AND stream_id = ? AND blob_number = ? AND blob_hash = ?", userID, streamID, blobNumber, hash).
+			Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("failed to update pending blob: %w", result.Error)
+		}
+		return nil
+	}
+
+	// Helper function to create new record with fallback to update
+	createWithFallback := func(pendingBlob db.PendingBlob, updates map[string]any) error {
+		err := s.db.WithContext(ctx).Create(&pendingBlob).Error
+		if err != nil {
+			return updateExisting(pendingBlob.BlobHash, pendingBlob.BlobNumber, pendingBlob.StreamID, updates)
+		}
+		return nil
+	}
 
 	// For terminating blobs, update all pending terminating blobs for the user
 	// since they all have the same hash and serve the same purpose
@@ -240,7 +257,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		// Update all terminating blobs for this user to mark them as received
 		result := s.db.WithContext(ctx).Model(&db.PendingBlob{}).
 			Where("user_id = ? AND blob_hash = ? AND received = ?", userID, terminatingHash, false).
-			Updates(map[string]interface{}{
+			Updates(map[string]any{
 				"received":  true,
 				"device_id": deviceID,
 			})
@@ -255,25 +272,20 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				BlobHash:    terminatingHash,
 				UserID:      userID,
 				DeviceID:    deviceID,
-				StreamID:    0, // Default to 0 since streamID is not available in this context
+				StreamID:    0,
 				BlobSize:    int(blobInfo.Length),
 				BlobNumber:  blobInfo.BlobNum,
-				Received:    true, // Mark as received when storing
+				Received:    true,
 				Terminating: true,
 				IVData:      blobInfo.IV,
 			}
 
-			// Build dynamic updates and conflict columns using shared helper functions
-			received := true
-			updates := s.buildPendingBlobUpdates(deviceID, nil, blobInfo, &received, &isTerminating, false, false)
-			conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, nil)
+			updates := map[string]any{
+				"received":  true,
+				"device_id": deviceID,
+			}
 
-			err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-				Columns:   conflictColumns,
-				DoUpdates: updates,
-			}).Create(&pendingBlob).Error
-
-			if err != nil {
+			if err := createWithFallback(pendingBlob, updates); err != nil {
 				return fmt.Errorf("failed to create terminating blob: %w", err)
 			}
 
@@ -289,35 +301,61 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		return nil
 	}
 
-	pendingBlob := db.PendingBlob{
-		BlobHash:    blobHash,
-		UserID:      userID,
-		DeviceID:    deviceID,
-		StreamID:    0, // Default to 0 since streamID is not available in this context
-		BlobSize:    int(blobInfo.Length),
-		BlobNumber:  blobInfo.BlobNum,
-		Received:    true, // Mark as received when storing
-		Terminating: isTerminating,
-		IVData:      blobInfo.IV,
-	}
-
-	// Build dynamic updates and conflict columns using shared helper functions
-	received := true
-	updates := s.buildPendingBlobUpdates(deviceID, streamID, blobInfo, &received, &isTerminating, false, false)
-	conflictColumns = s.buildPendingBlobConflictColumns(isTerminating, streamID)
-
-	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   conflictColumns,
-		DoUpdates: updates,
-	}).Create(&pendingBlob).Error
+	// For regular blobs, find existing records first and update them using their unique key
+	// Find all pending blobs with this hash for this user
+	var existingBlobs []db.PendingBlob
+	err := s.db.WithContext(ctx).Where("user_id = ? AND blob_hash = ? AND received = ?", userID, blobHash, false).
+		Find(&existingBlobs).Error
 
 	if err != nil {
-		s.logger.Error("Failed to mark pending blob as received",
+		return fmt.Errorf("failed to find existing pending blobs: %w", err)
+	}
+
+	updates := map[string]any{
+		"received":  true,
+		"device_id": deviceID,
+		"blob_size": blobInfo.Length,
+		"iv_data":   blobInfo.IV,
+	}
+
+	if len(existingBlobs) > 0 {
+		// Update existing records using their unique keys
+		for _, existingBlob := range existingBlobs {
+			// Only update blob_number if we have a valid one from blobInfo
+			if blobInfo.BlobNum > 0 {
+				updates["blob_number"] = blobInfo.BlobNum
+			}
+
+			if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updates); err != nil {
+				return err
+			}
+		}
+
+		s.logger.Debug("Updated existing pending blobs as received",
 			zap.Uint("user_id", userID),
 			zap.String("blob_hash", blobHash),
-			zap.Bool("terminating", isTerminating),
-			zap.Error(err))
-		return fmt.Errorf("failed to mark pending blob as received: %w", err)
+			zap.Int("updated_count", len(existingBlobs)))
+	} else {
+		// No existing records found, create a new one
+		pendingBlob := db.PendingBlob{
+			BlobHash:    blobHash,
+			UserID:      userID,
+			DeviceID:    deviceID,
+			StreamID:    0,
+			BlobSize:    int(blobInfo.Length),
+			BlobNumber:  blobInfo.BlobNum,
+			Received:    true,
+			Terminating: isTerminating,
+			IVData:      blobInfo.IV,
+		}
+
+		if err := createWithFallback(pendingBlob, updates); err != nil {
+			return fmt.Errorf("failed to create pending blob: %w", err)
+		}
+
+		s.logger.Debug("Created new pending blob as received",
+			zap.Uint("user_id", userID),
+			zap.String("blob_hash", blobHash))
 	}
 
 	return nil
