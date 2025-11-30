@@ -292,14 +292,9 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		// For terminating blobs, update all pending terminating blobs for the user
 		// since they all have the same hash and serve the same purpose
 		if isTerminating {
-			terminatingHash, _, err := s.getBlobHashFromInfo(&stream.BlobInfo{})
-			if err != nil {
-				return fmt.Errorf("failed to get terminating blob hash: %w", err)
-			}
-
 			// Update all terminating blobs for this user to mark them as received
 			result := tx.Model(&db.PendingBlob{}).
-				Where("user_id = ? AND blob_hash = ? AND received = ?", userID, terminatingHash, false).
+				Where("user_id = ? AND blob_hash = ? AND received = ?", userID, blobHash, false).
 				Updates(map[string]any{
 					"received":  true,
 					"device_id": deviceID,
@@ -312,7 +307,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			// If no terminating blobs were updated, create a new one
 			if result.RowsAffected == 0 {
 				pendingBlob := db.PendingBlob{
-					BlobHash:    terminatingHash,
+					BlobHash:    blobHash,
 					UserID:      userID,
 					DeviceID:    deviceID,
 					StreamID:    0,
@@ -334,20 +329,20 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 
 				s.logger.Debug("Created new terminating blob as received",
 					zap.Uint("user_id", userID),
-					zap.String("terminating_hash", terminatingHash))
+					zap.String("terminating_hash", blobHash))
 			} else {
 				s.logger.Debug("Updated all terminating blobs as received",
 					zap.Uint("user_id", userID),
-					zap.String("terminating_hash", terminatingHash))
+					zap.String("terminating_hash", blobHash))
 			}
 
 			return nil
 		}
 
 		// For regular blobs, find existing records first and update them using their unique key
-		// Find all pending blobs with this hash for this user
+		// Find all pending blobs with this hash for this user (both received and not received)
 		var existingBlobs []db.PendingBlob
-		err := tx.Where("user_id = ? AND blob_hash = ? AND received = ?", userID, blobHash, false).
+		err := tx.Where("user_id = ? AND blob_hash = ?", userID, blobHash).
 			Find(&existingBlobs).Error
 
 		if err != nil {
@@ -371,21 +366,40 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		}
 
 		if len(existingBlobs) > 0 {
-			// Create updates map without blob_number to prevent unique constraint violations
-			// blob_number should only be set when creating new records, not updating existing ones
-			updateOnlyFields := lo.OmitByKeys(updates, []string{"blob_number"})
+			// Split existing blobs into those with received=false and received=true
+			var notReceivedBlobs []db.PendingBlob
+			var alreadyReceivedBlobs []db.PendingBlob
 
-			// Update existing records using their unique keys
 			for _, existingBlob := range existingBlobs {
+				if !existingBlob.Received {
+					notReceivedBlobs = append(notReceivedBlobs, existingBlob)
+				} else {
+					alreadyReceivedBlobs = append(alreadyReceivedBlobs, existingBlob)
+				}
+			}
+
+			// Update blobs with received=false using full updates map
+			for _, existingBlob := range notReceivedBlobs {
+				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updates); err != nil {
+					return err
+				}
+			}
+
+			// Update blobs with received=true using updates map without blob_number to avoid unique constraint violations
+			updateOnlyFields := lo.OmitByKeys(updates, []string{"blob_number"})
+			for _, existingBlob := range alreadyReceivedBlobs {
 				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updateOnlyFields); err != nil {
 					return err
 				}
 			}
 
+			totalUpdated := len(notReceivedBlobs) + len(alreadyReceivedBlobs)
 			s.logger.Debug("Updated existing pending blobs as received",
 				zap.Uint("user_id", userID),
 				zap.String("blob_hash", blobHash),
-				zap.Int("updated_count", len(existingBlobs)))
+				zap.Int("not_received_count", len(notReceivedBlobs)),
+				zap.Int("already_received_count", len(alreadyReceivedBlobs)),
+				zap.Int("total_updated", totalUpdated))
 		} else {
 			// No existing records found, create a new one
 			pendingBlob := db.PendingBlob{
