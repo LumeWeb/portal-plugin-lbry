@@ -292,7 +292,10 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		// For terminating blobs, update all pending terminating blobs for the user
 		// since they all have the same hash and serve the same purpose
 		if isTerminating {
-			terminatingHash, _, _ := s.getBlobHashFromInfo(&stream.BlobInfo{})
+			terminatingHash, _, err := s.getBlobHashFromInfo(&stream.BlobInfo{})
+			if err != nil {
+				return fmt.Errorf("failed to get terminating blob hash: %w", err)
+			}
 
 			// Update all terminating blobs for this user to mark them as received
 			result := tx.Model(&db.PendingBlob{}).
@@ -368,9 +371,13 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		}
 
 		if len(existingBlobs) > 0 {
+			// Create updates map without blob_number to prevent unique constraint violations
+			// blob_number should only be set when creating new records, not updating existing ones
+			updateOnlyFields := lo.OmitByKeys(updates, []string{"blob_number"})
+
 			// Update existing records using their unique keys
 			for _, existingBlob := range existingBlobs {
-				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updates); err != nil {
+				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updateOnlyFields); err != nil {
 					return err
 				}
 			}
