@@ -33,13 +33,15 @@ func (bs *BlobStore) convertToStorageHash(hash string) (core.StorageHash, error)
 
 // isTerminatingBlob checks if a hash represents a terminating blob
 func (bs *BlobStore) isTerminatingBlob(hash string) bool {
-	return hash == ""
+	return hash == "" || hash == internal.TerminatingBlobHash
 }
 
 // closeReaderSafely safely closes a reader if it implements io.Closer
 func (bs *BlobStore) closeReaderSafely(reader io.Reader) {
 	if closer, ok := reader.(io.Closer); ok {
-		_ = closer.Close()
+		if err := closer.Close(); err != nil {
+			bs.logger.Debug("Failed to close reader", zap.Error(err))
+		}
 	}
 }
 
@@ -74,12 +76,14 @@ func (bs *BlobStore) upsertBlobRecord(ctx context.Context, tx *gorm.DB, blob plu
 
 // validateBlob checks if a blob is valid for processing
 func (bs *BlobStore) validateBlob(blob pluginDb.Blob) bool {
-	// Valid blobs must have both hash and IV if they contain data,
-	// unless they are terminating blobs (which have no data by design)
-	if (len(blob.BlobHash) == 0 || len(blob.IVData) == 0) && blob.BlobSize > 0 && !blob.Terminating {
-		return false
+	// Terminating blobs are always valid (they have no data by design)
+	if blob.Terminating {
+		return true
 	}
-	return true
+	// Non-terminating blobs with data must have both hash and IV
+	hasData := blob.BlobSize > 0
+	hasMissingMetadata := len(blob.BlobHash) == 0 || len(blob.IVData) == 0
+	return !(hasData && hasMissingMetadata)
 }
 
 // BlobStore implements the storage.BlobStore interface for LBRY protocol
@@ -223,7 +227,7 @@ func (bs *BlobStore) getRegularBlob(ctx context.Context, hash string) ([]byte, e
 	// Check if this is a terminating blob using helper
 	if bs.isTerminatingBlob(hash) {
 		bs.logger.Debug("Handling terminating blob",
-			zap.String("blob_hash", hash))
+			zap.String("blob_type", "terminating"))
 		// Return empty data for terminating blobs (consistent with reflector store behavior)
 		return []byte{}, nil
 	}

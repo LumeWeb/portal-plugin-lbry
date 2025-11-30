@@ -9,7 +9,6 @@ import (
 
 	"github.com/ipfs/go-cid"
 	"github.com/samber/lo"
-	"go.lumeweb.com/liblbry/blob"
 	lbrycrypto "go.lumeweb.com/liblbry/crypto"
 	"go.lumeweb.com/liblbry/stream"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
@@ -372,11 +371,12 @@ func (s *UploadServiceDefault) getBlobHashFromInfo(blobInfo *stream.BlobInfo) (s
 	isTerminating := len(blobInfo.BlobHash) == 0
 
 	if isTerminating {
-		hash, err := blob.ComputeBlobHashBytes([]byte(internal.TerminatingBlobHash))
-		if err != nil {
-			return "", true, fmt.Errorf("failed to compute terminating blob hash: %w", err)
+		// Use centralized terminating blob hash generation
+		hash := internal.GetTerminatingBlobHash()
+		if hash == "" {
+			return "", true, fmt.Errorf("failed to generate terminating blob hash")
 		}
-		return hex.EncodeToString(hash), true, nil
+		return hash, true, nil
 	} else {
 		// Use actual hash for non-terminating blobs
 		return hex.EncodeToString(blobInfo.BlobHash), false, nil

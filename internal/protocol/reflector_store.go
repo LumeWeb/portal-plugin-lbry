@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 
-	"go.lumeweb.com/liblbry/blob"
 	"go.lumeweb.com/liblbry/protocol"
 	lbrystream "go.lumeweb.com/liblbry/stream"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
@@ -164,22 +163,23 @@ func getReflectorBlobPath(userID uint, blobHash string) string {
 }
 
 // validateContextForReflector performs common context validation for reflector operations
-func (rs *ReflectorStore) validateContextForReflector(ctx context.Context) (uint, string, error) {
+// Returns the IP address from the context if valid.
+func (rs *ReflectorStore) validateContextForReflector(ctx context.Context) (string, error) {
 	// Extract IP address and source from context using liblbry helpers
 	ipAddress, hasIP := protocol.GetIPAddressFromContext(ctx)
 	source, hasSource := protocol.GetSourceFromContext(ctx)
 
 	// Ensure this is a reflector request
 	if !hasSource || source != protocol.SourceReflector {
-		return 0, "", fmt.Errorf("request source is not reflector")
+		return "", fmt.Errorf("request source is not reflector")
 	}
 
 	// Must have IP address to identify device
 	if !hasIP {
-		return 0, "", fmt.Errorf("no IP address found in context")
+		return "", fmt.Errorf("no IP address found in context")
 	}
 
-	return 0, ipAddress, nil
+	return ipAddress, nil
 }
 
 // closeReaderSafely safely closes a reader if it implements io.Closer
@@ -218,11 +218,6 @@ func (rs *ReflectorStore) isTerminatingBlob(userID uint, hash string) bool {
 	}
 
 	return isTerminating
-}
-
-// getTerminatingBlobHash generates a deterministic terminating blob hash
-func (rs *ReflectorStore) getTerminatingBlobHash() string {
-	return internal.GetTerminatingBlobHash()
 }
 
 // Get retrieves a blob by its hash from temporary storage
@@ -274,12 +269,11 @@ func (rs *ReflectorStore) Put(ctx context.Context, hash string, data []byte) err
 
 		// For terminating blobs, skip storage but still mark as received
 		if err := rs.markBlobAsReceived(ctx, userID, hash, int64(len(data))); err != nil {
-			rs.logger.Warn("Failed to mark terminating blob as received in pending records",
+			rs.logger.Error("Failed to mark terminating blob as received in pending records",
 				zap.String("blob_hash", hash),
 				zap.Uint("user_id", userID),
 				zap.Error(err))
-			// Don't fail the operation - just the tracking failed
-			return nil
+			return fmt.Errorf("failed to mark terminating blob %q as received: %w", hash, err)
 		}
 
 		return nil
@@ -299,12 +293,12 @@ func (rs *ReflectorStore) Put(ctx context.Context, hash string, data []byte) err
 
 	// Update pending blob record to mark as received
 	if err := rs.markBlobAsReceived(ctx, userID, hash, int64(len(data))); err != nil {
-		rs.logger.Warn("Failed to mark blob as received in pending records",
+		rs.logger.Error("Failed to mark blob as received in pending records - upload tracking failed",
 			zap.String("blob_hash", hash),
 			zap.Uint("user_id", userID),
 			zap.Error(err))
-		// Don't fail the upload operation - the blob is stored, just the tracking failed
-		return nil
+
+		return fmt.Errorf("failed to mark blob %q as received: %w", hash, err)
 	}
 
 	return nil
@@ -356,7 +350,7 @@ func (rs *ReflectorStore) extractUserIDFromContext(ctx context.Context) uint {
 	}
 
 	// Validate context for reflector operations
-	_, ipAddress, err := rs.validateContextForReflector(ctx)
+	ipAddress, err := rs.validateContextForReflector(ctx)
 	if err != nil {
 		rs.logger.Warn("Context validation failed for user ID extraction",
 			zap.Error(err))
@@ -390,7 +384,7 @@ func (rs *ReflectorStore) extractUserIDFromContext(ctx context.Context) uint {
 // extractDeviceIDFromContext extracts device ID from context by looking up device by IP
 func (rs *ReflectorStore) extractDeviceIDFromContext(ctx context.Context) (uint, error) {
 	// Validate context for reflector operations
-	_, ipAddress, err := rs.validateContextForReflector(ctx)
+	ipAddress, err := rs.validateContextForReflector(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("context validation failed: %w", err)
 	}

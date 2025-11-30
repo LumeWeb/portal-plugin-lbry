@@ -85,7 +85,6 @@ CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_user_id ON lbry_pending_blobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_user_id ON lbry_pending_blobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_device_id ON lbry_pending_blobs(device_id);
 CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_stream_id ON lbry_pending_blobs(stream_id);
 
