@@ -110,6 +110,11 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 		return fmt.Errorf("failed to get pending stream: %w", err)
 	}
 
+	h.Logger().Debug("Checking stream assembly progress",
+		zap.Uint("user_id", userID),
+		zap.String("sd_blob_hash", sdBlobHash),
+		zap.Int("total_blobs_expected", pendingStream.TotalBlobs))
+
 	// Get SD blob data from temporary storage
 	storageSvc, err := GetStorageService(h.Context())
 	if err != nil {
@@ -138,12 +143,44 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 		return fmt.Errorf("failed to check missing blobs: %w", err)
 	}
 
-	if len(missingBlobs) > 0 {
-		h.Logger().Info("Missing blobs for stream assembly, will retry",
+	// Get count of pending blobs for this stream
+	pendingCount, err := uploadService.GetPendingBlobCount(ctx, userID, pendingStream.ID)
+	if err != nil {
+		return fmt.Errorf("failed to count pending blobs: %w", err)
+	}
+
+	// Validate total vs pending independently
+	expectedTotal := pendingStream.TotalBlobs
+	pendingTotal := int(pendingCount)
+
+	// Check for mismatch between expected total and SD blob requirements
+	if expectedTotal != len(requiredBlobs) {
+		h.Logger().Warn("Total blobs count mismatch between pending stream and SD blob",
 			zap.Uint("user_id", userID),
 			zap.String("sd_blob_hash", sdBlobHash),
-			zap.Strings("missing_blobs", missingBlobs))
-		return fmt.Errorf("missing %d required blobs", len(missingBlobs))
+			zap.Int("expected_total_from_db", expectedTotal),
+			zap.Int("required_from_sd_blob", len(requiredBlobs)))
+		// Use the SD blob count as the authoritative source
+		expectedTotal = len(requiredBlobs)
+	}
+
+	// Check if we have missing blobs OR if pending count doesn't match expected
+	if len(missingBlobs) > 0 || pendingTotal != expectedTotal {
+		progressPercent := 0
+		if expectedTotal > 0 {
+			progressPercent = int(float64(pendingTotal) / float64(expectedTotal) * 100)
+		}
+
+		h.Logger().Info("Stream not ready for assembly, will retry",
+			zap.Uint("user_id", userID),
+			zap.String("sd_blob_hash", sdBlobHash),
+			zap.Int("expected_total", expectedTotal),
+			zap.Int("pending_total", pendingTotal),
+			zap.Int("missing_from_required", len(missingBlobs)),
+			zap.Int("progress_percent", progressPercent),
+			zap.Strings("missing_blob_hashes", missingBlobs))
+		return fmt.Errorf("stream not ready: pending %d/%d blobs, missing %d required blobs",
+			pendingTotal, expectedTotal, len(missingBlobs))
 	}
 
 	// Assemble the stream
@@ -152,9 +189,11 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 		return fmt.Errorf("failed to assemble stream: %w", err)
 	}
 
-	h.Logger().Debug("Successfully assembled stream",
+	h.Logger().Info("Successfully assembled stream",
 		zap.Uint("user_id", userID),
 		zap.String("sd_blob_hash", sdBlobHash),
+		zap.Int("expected_total", expectedTotal),
+		zap.Int("pending_total", pendingTotal),
 		zap.Int("blob_count", len(requiredBlobs)))
 
 	return nil
@@ -368,14 +407,22 @@ func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx con
 
 	var blobInfos []lbrystream.BlobInfo
 	for _, pendingBlob := range pendingBlobs {
-		// Convert blob hash from hex string to bytes
-		blobHashBytes, err := hex.DecodeString(pendingBlob.BlobHash)
-		if err != nil {
-			h.Logger().Warn("Failed to decode pending blob hash from hex string",
-				zap.String("blob_hash", pendingBlob.BlobHash),
-				zap.Uint("user_id", userID),
-				zap.Error(err))
-			continue
+		var blobHashBytes []byte
+
+		// For terminating blobs, always use empty hash in blob lists
+		if pendingBlob.Terminating {
+			blobHashBytes = []byte{} // Empty hash for terminating blobs
+		} else {
+			// Convert blob hash from hex string to bytes for non-terminating blobs
+			var err error
+			blobHashBytes, err = hex.DecodeString(pendingBlob.BlobHash)
+			if err != nil {
+				h.Logger().Warn("Failed to decode pending blob hash from hex string",
+					zap.String("blob_hash", pendingBlob.BlobHash),
+					zap.Uint("user_id", userID),
+					zap.Error(err))
+				continue
+			}
 		}
 
 		// Create BlobInfo using the IV data from the pending blob

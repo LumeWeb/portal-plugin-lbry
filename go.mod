@@ -13,7 +13,7 @@ require (
 	github.com/tus/tusd/v2 v2.8.0
 	go.lumeweb.com/httputil v0.5.3
 	go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639
-	go.lumeweb.com/liblbry v0.0.0-20251129073709-31676ef618d3
+	go.lumeweb.com/liblbry v0.0.0-20251130010928-5b0b52d8fef8
 	go.lumeweb.com/portal v0.4.2-0.20251127051039-9d285282f553
 	go.lumeweb.com/portal-middleware v0.3.3
 	go.lumeweb.com/portal-router v0.6.8

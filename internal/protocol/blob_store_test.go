@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.lumeweb.com/liblbry/blob"
 	"go.lumeweb.com/liblbry/stream"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
@@ -1033,6 +1034,43 @@ func TestLBRYBlobStore_Put_LargeBlob(t *testing.T) {
 	})
 }
 
+func TestLBRYBlobStore_Put_TerminatingBlob(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		ast := assert.New(tb)
+		store, err := NewLBRYBlobStore(ctx)
+		require.NoError(tb, err)
+
+		// Create a mock storage service
+		mockStorage := coreMocks.NewMockStorageService(tb)
+		store.storageSvc = mockStorage
+
+		// Set up mock expectations - storage should NOT be called for terminating blob
+
+		// Act - Put terminating blob with empty hash and no data
+		err = store.Put(t.Context(), "", []byte{})
+
+		// Assert
+		ast.NoError(err)
+
+		// Calculate expected terminating blob hash
+		expectedTerminatingHash, err := blob.ComputeBlobHashBytes([]byte(internal.TerminatingBlobHash))
+		require.NoError(tb, err)
+		expectedTerminatingHashStr := hex.EncodeToString(expectedTerminatingHash)
+
+		// Check that blob was inserted into DB with correct properties
+		var blob db.Blob
+		err = ctx.DB().Where("blob_hash = ?", expectedTerminatingHashStr).First(&blob).Error
+		ast.NoError(err)
+		ast.Equal(expectedTerminatingHashStr, blob.BlobHash)
+		ast.Equal(0, blob.BlobSize)
+		ast.True(blob.Terminating)
+
+		// Verify storage was NOT called for terminating blob
+		mockStorage.AssertNotCalled(tb, "UploadObject")
+	})
+}
+
 func TestLBRYBlobStore_List_PaginationEdgeCases(t *testing.T) {
 	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) { // Arrange
 		ast := assert.New(tb)
@@ -1142,19 +1180,19 @@ func TestLBRYBlobStore_Get_SDBlobSkipsEmptyBlobs(t *testing.T) {
 		{
 			name: "zero_size_blob",
 			blobs: []db.Blob{
-				{BlobHash: testBlobHash1, BlobSize: 0, IVData: []byte("iv12345678901234")},
+				{BlobHash: testBlobHash1, BlobSize: 0, IVData: []byte("iv12345678901234"), Terminating: true},
 			},
-			expectedCount:   1, // Zero-size blob is included when it's the terminating blob
-			expectedIVs:     [][]byte{[]byte("iv12345678901234")},
-			description:     "Zero-size blob should be included when it's the terminating blob",
+			expectedCount:   1,          // Zero-size blob is included when it's marked as terminating
+			expectedIVs:     [][]byte{}, // Terminating blob should have empty hash
+			description:     "Zero-size blob should be included when it's marked as terminating",
 			allowZeroLength: true,
 		},
 		{
 			name: "non_terminating_zero_size_blob",
 			blobs: []db.Blob{
-				{BlobHash: testBlobHash1, BlobSize: 100, IVData: []byte("iv12345678901234")},
-				{BlobHash: testBlobHash3, BlobSize: 0, IVData: []byte("iv56789012345678")},
-				{BlobHash: testBlobHash2, BlobSize: 200, IVData: []byte("iv56789012345678")},
+				{BlobHash: testBlobHash1, BlobSize: 100, IVData: []byte("iv12345678901234"), Terminating: false},
+				{BlobHash: testBlobHash3, BlobSize: 0, IVData: []byte("iv56789012345678"), Terminating: false},
+				{BlobHash: testBlobHash2, BlobSize: 200, IVData: []byte("iv56789012345678"), Terminating: false},
 			},
 			expectedCount:   2, // Non-terminating zero-size blob should be skipped, but the other two should be included
 			expectedIVs:     [][]byte{[]byte("iv12345678901234"), []byte("iv56789012345678")},
@@ -1164,7 +1202,7 @@ func TestLBRYBlobStore_Get_SDBlobSkipsEmptyBlobs(t *testing.T) {
 		{
 			name: "empty_iv_blob",
 			blobs: []db.Blob{
-				{BlobHash: testBlobHash1, BlobSize: 100, IVData: []byte{}},
+				{BlobHash: testBlobHash1, BlobSize: 100, IVData: []byte{}, Terminating: false},
 			},
 			expectedCount:   0,
 			expectedIVs:     [][]byte{},
@@ -1274,8 +1312,16 @@ func TestLBRYBlobStore_Get_SDBlobSkipsEmptyBlobs(t *testing.T) {
 				// Verify the valid blobs are included with correct IV data
 				if tc.expectedCount > 0 {
 					for i, blobInfo := range parsedSdBlob.BlobInfos {
-						ast.Equal(tc.expectedIVs[i], blobInfo.IV, "IV data should match for blob %d in test case %s", i, tc.name)
-						ast.NotEmpty(blobInfo.BlobHash, "Valid blob should have non-empty hash in test case %s", tc.name)
+						// Check IV data - for terminating blobs, expectedIVs might be empty
+						if i < len(tc.expectedIVs) {
+							ast.Equal(tc.expectedIVs[i], blobInfo.IV, "IV data should match for blob %d in test case %s", i, tc.name)
+						}
+						// For terminating blobs, hash should be empty; for non-terminating, hash should be non-empty
+						if tc.blobs[i].Terminating {
+							ast.Empty(blobInfo.BlobHash, "Terminating blob should have empty hash in test case %s", tc.name)
+						} else {
+							ast.NotEmpty(blobInfo.BlobHash, "Non-terminating blob should have non-empty hash in test case %s", tc.name)
+						}
 
 						// Check length based on test case expectations
 						if tc.allowZeroLength && blobInfo.Length == 0 {
@@ -1375,32 +1421,36 @@ func TestLBRYBlobStore_BuildBlobInfosFromDb_RoundTripHashConsistency(t *testing.
 
 		// Create multiple test blobs with different hash patterns
 		testCases := []struct {
-			name    string
-			hash    []byte
-			size    int
-			iv      []byte
-			blobNum int
+			name        string
+			hash        []byte
+			size        int
+			iv          []byte
+			blobNum     int
+			terminating bool
 		}{
 			{
-				name:    "simple_hash",
-				hash:    []byte{0x01, 0x02, 0x03, 0x04},
-				size:    512,
-				iv:      []byte("iv1_test_16_bytes"),
-				blobNum: 0,
+				name:        "simple_hash",
+				hash:        []byte{0x01, 0x02, 0x03, 0x04},
+				size:        512,
+				iv:          []byte("iv1_test_16_bytes"),
+				blobNum:     0,
+				terminating: false,
 			},
 			{
-				name:    "complex_hash",
-				hash:    []byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88},
-				size:    2048,
-				iv:      []byte("iv2_test_16_bytes"),
-				blobNum: 1,
+				name:        "complex_hash",
+				hash:        []byte{0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88},
+				size:        2048,
+				iv:          []byte("iv2_test_16_bytes"),
+				blobNum:     1,
+				terminating: false,
 			},
 			{
-				name:    "empty_hash",
-				hash:    nil, // Empty hash should result in nil after hex decoding
-				size:    0,
-				iv:      []byte("iv3_test_16_bytes"),
-				blobNum: 2,
+				name:        "empty_hash",
+				hash:        nil, // Empty hash should result in empty slice after hex decoding for terminating blobs
+				size:        0,
+				iv:          []byte("iv3_test_16_bytes"),
+				blobNum:     2,
+				terminating: true, // Mark as terminating so it's included in results
 			},
 		}
 
@@ -1408,9 +1458,10 @@ func TestLBRYBlobStore_BuildBlobInfosFromDb_RoundTripHashConsistency(t *testing.
 			// Create blob with hex-encoded hash
 			blobHashHex := hex.EncodeToString(tc.hash)
 			testBlob := db.Blob{
-				BlobHash: blobHashHex,
-				BlobSize: tc.size,
-				IVData:   tc.iv,
+				BlobHash:    blobHashHex,
+				BlobSize:    tc.size,
+				IVData:      tc.iv,
+				Terminating: tc.terminating,
 			}
 			err = ctx.DB().Create(&testBlob).Error
 			require.NoError(tb, err)
@@ -1445,7 +1496,12 @@ func TestLBRYBlobStore_BuildBlobInfosFromDb_RoundTripHashConsistency(t *testing.
 
 			require.NotNil(tb, foundBlob, "Should find blob info for test case: %s", tc.name)
 			if foundBlob != nil {
-				ast.Equal(tc.hash, foundBlob.BlobHash,
+				// For terminating blobs, hash should be empty slice, not nil
+				expectedHash := tc.hash
+				if tc.terminating {
+					expectedHash = []byte{} // Terminating blobs get empty hash in blob lists
+				}
+				ast.Equal(expectedHash, foundBlob.BlobHash,
 					"Hash should match original for test case: %s", tc.name)
 				ast.Equal(tc.size, foundBlob.Length,
 					"Size should match for test case: %s", tc.name)

@@ -119,7 +119,7 @@ func TestReflectorStore_ExtractUserIDFromContext_WithDeviceLookup(t *testing.T) 
 
 		// Set up mock expectation for device lookup
 		mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, testIPAddress).
-			Return(testDevice, nil).Once()
+			Return(testDevice, nil).Maybe()
 
 		// Create context with reflector source and IP address
 		ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
@@ -142,17 +142,23 @@ func TestReflectorStore_Put(t *testing.T) {
 		// Create mock services
 		mockStorage := coreMocks.NewMockStorageService(tb)
 		mockDeviceService := pluginMocks.NewMockDeviceService(tb)
+		mockUploadService := pluginMocks.NewMockUploadService(tb)
 		store.storageSvc = mockStorage
 		store.deviceSvc = mockDeviceService
+		store.uploadSvc = mockUploadService
 
 		testData := []byte("test reflector blob data")
-		testHash := "test_hash_123"
+		testHash := "a2f1841bb9c5f3b583ac3b8c07ee1a5bf9cc48923721c30d5ca6318615776c284e8936d72fa4db7fdda2e4e9598b1e6c"
 		userID := uint(123)
 		testIPAddress := "192.168.1.100"
 
 		// Set up mock expectations
 		mockStorage.EXPECT().S3TemporaryUpload(mock.Anything, mock.Anything, mock.AnythingOfType("uint64"), mock.Anything, mock.AnythingOfType("func(*core.S3TempUploadOptions)")).
 			Return("upload_id_123", nil).Once()
+
+		// Set up mock expectation for MarkPendingBlobAsReceived
+		mockUploadService.EXPECT().MarkPendingBlobAsReceived(mock.Anything, userID, uint(1), mock.AnythingOfType("*stream.BlobInfo")).
+			Return(nil).Once()
 
 		testDevice := &pluginDb.Device{
 			Model: gorm.Model{
@@ -163,7 +169,7 @@ func TestReflectorStore_Put(t *testing.T) {
 			IPAddress: testIPAddress,
 		}
 		mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, testIPAddress).
-			Return(testDevice, nil).Once()
+			Return(testDevice, nil).Times(2)
 
 		// Create context with reflector source and IP address
 		ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
@@ -174,6 +180,99 @@ func TestReflectorStore_Put(t *testing.T) {
 
 		// Assert
 		assert.NoError(t, err)
+	})
+}
+
+func TestReflectorStore_Put_TerminatingBlob(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		// Create mock services
+		mockStorage := coreMocks.NewMockStorageService(tb)
+		mockDeviceService := pluginMocks.NewMockDeviceService(tb)
+		mockUploadService := pluginMocks.NewMockUploadService(tb)
+		store.storageSvc = mockStorage
+		store.deviceSvc = mockDeviceService
+		store.uploadSvc = mockUploadService
+
+		testData := []byte{} // Empty data for terminating blob
+		testHash := ""       // Empty hash for terminating blob
+		userID := uint(123)
+		testIPAddress := "192.168.1.100"
+
+		// Set up mock expectations - storage should NOT be called for terminating blob
+		// But upload service should be called to mark as received
+		mockUploadService.EXPECT().MarkPendingBlobAsReceived(mock.Anything, userID, uint(1), mock.AnythingOfType("*stream.BlobInfo")).
+			Return(nil).Once()
+
+		testDevice := &pluginDb.Device{
+			Model: gorm.Model{
+				ID: 1,
+			},
+			UserID:    userID,
+			Name:      "test-device",
+			IPAddress: testIPAddress,
+		}
+		mockDeviceService.EXPECT().GetDeviceByIPAddress(mock.Anything, testIPAddress).
+			Return(testDevice, nil).Twice()
+
+		// Create context with reflector source and IP address
+		ctxWithSource := context.WithValue(context.Background(), protocol.SourceContextKey, protocol.SourceReflector)
+		ctxWithIP := context.WithValue(ctxWithSource, protocol.IPAddressContextKey, testIPAddress)
+
+		// Act
+		err = store.Put(ctxWithIP, testHash, testData)
+
+		// Assert
+		assert.NoError(t, err)
+
+		// Verify that storage was NOT called (terminating blob should skip storage)
+		// Since we didn't set up any storage expectations, the test would fail if storage was called
+	})
+}
+
+func TestReflectorStore_IsTerminatingBlob(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		userID := uint(123)
+
+		// Test cases
+		testCases := []struct {
+			name           string
+			hash           string
+			expectedResult bool
+		}{
+			{
+				name:           "empty hash is terminating",
+				hash:           "",
+				expectedResult: true,
+			},
+			{
+				name:           "non-empty hash is not terminating",
+				hash:           "some_hash_value",
+				expectedResult: false,
+			},
+			{
+				name:           "zero hash is not terminating",
+				hash:           "0000000000000000",
+				expectedResult: false,
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				// Act
+				result := store.isTerminatingBlob(userID, tc.hash)
+
+				// Assert
+				assert.Equal(t, tc.expectedResult, result)
+			})
+		}
 	})
 }
 
@@ -632,5 +731,21 @@ func TestReflectorStore_Has_DeviceLookupError(t *testing.T) {
 		// Assert
 		assert.NoError(t, err)  // Should not return error, just false
 		assert.False(t, exists) // Should return false when device lookup fails
+	})
+}
+
+func TestReflectorStore_markBlobAsReceived_InvalidHash(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		store, err := NewReflectorStore(ctx)
+		require.NoError(tb, err)
+
+		userID := uint(123)
+		invalidHash := "invalid-hash"
+
+		// Act & Assert
+		err = store.markBlobAsReceived(t.Context(), userID, invalidHash, 100)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to decode blob hash")
 	})
 }

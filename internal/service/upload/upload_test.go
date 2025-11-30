@@ -17,7 +17,7 @@ import (
 	pluginMocks "go.lumeweb.com/portal-plugin-lbry/core/mocks"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
-	"go.lumeweb.com/portal-plugin-lbry/internal/db"
+	pluginDb "go.lumeweb.com/portal-plugin-lbry/internal/db"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db/migrations"
 	"go.lumeweb.com/portal-plugin-lbry/internal/protocol"
 	pluginTesting "go.lumeweb.com/portal-plugin-lbry/internal/testing"
@@ -174,6 +174,254 @@ func TestUploadServiceDefault_HandleUpload(t *testing.T) {
 					_, err := stream.FromMultihash(multihash)
 					assert.NoError(tb, err, "CID should be a valid LBRY stream multihash")
 				}
+			}, getTestOptions())
+		})
+	}
+}
+
+func TestUploadServiceDefault_GetPendingBlobCount(t *testing.T) {
+	tests := []struct {
+		name        string
+		userID      uint
+		streamID    uint
+		setupData   func(coreTesting.TestContext)
+		expectCount int64
+		expectError bool
+	}{
+		{
+			name:     "no pending blobs",
+			userID:   1,
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) {
+				// No pending blobs created
+			},
+			expectCount: 0,
+			expectError: false,
+		},
+		{
+			name:     "single pending blob",
+			userID:   1,
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) {
+				pendingBlob := pluginDb.PendingBlob{
+					BlobHash:   testUploadHash1,
+					UserID:     1,
+					StreamID:   1,
+					BlobSize:   1024,
+					BlobNumber: 0,
+					Received:   true,
+				}
+				err := ctx.DB().Create(&pendingBlob).Error
+				require.NoError(t, err)
+			},
+			expectCount: 1,
+			expectError: false,
+		},
+		{
+			name:     "multiple pending blobs",
+			userID:   1,
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) {
+				pendingBlobs := []pluginDb.PendingBlob{
+					{BlobHash: testUploadHash1, UserID: 1, StreamID: 1, BlobSize: 1024, BlobNumber: 0, Received: true},
+					{BlobHash: testUploadHash2, UserID: 1, StreamID: 1, BlobSize: 2048, BlobNumber: 1, Received: true},
+					{BlobHash: testUploadHash3, UserID: 1, StreamID: 1, BlobSize: 3072, BlobNumber: 2, Received: false},
+				}
+				for _, blob := range pendingBlobs {
+					err := ctx.DB().Create(&blob).Error
+					require.NoError(t, err)
+				}
+			},
+			expectCount: 3,
+			expectError: false,
+		},
+		{
+			name:     "blobs for different users",
+			userID:   1,
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) {
+				pendingBlobs := []pluginDb.PendingBlob{
+					{BlobHash: testUploadHash1, UserID: 1, StreamID: 1, BlobSize: 1024, BlobNumber: 0, Received: true},
+					{BlobHash: testUploadHash2, UserID: 2, StreamID: 1, BlobSize: 2048, BlobNumber: 1, Received: true}, // Different user
+					{BlobHash: testUploadHash3, UserID: 1, StreamID: 2, BlobSize: 3072, BlobNumber: 0, Received: true}, // Different stream
+				}
+				for _, blob := range pendingBlobs {
+					err := ctx.DB().Create(&blob).Error
+					require.NoError(t, err)
+				}
+			},
+			expectCount: 1, // Only count blobs for user 1 and stream 1
+			expectError: false,
+		},
+		{
+			name:     "blobs for different streams",
+			userID:   1,
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) {
+				pendingBlobs := []pluginDb.PendingBlob{
+					{BlobHash: testUploadHash1, UserID: 1, StreamID: 1, BlobSize: 1024, BlobNumber: 0, Received: true},
+					{BlobHash: testUploadHash2, UserID: 1, StreamID: 2, BlobSize: 2048, BlobNumber: 0, Received: true}, // Different stream
+					{BlobHash: testUploadHash3, UserID: 1, StreamID: 3, BlobSize: 3072, BlobNumber: 0, Received: true}, // Different stream
+				}
+				for _, blob := range pendingBlobs {
+					err := ctx.DB().Create(&blob).Error
+					require.NoError(t, err)
+				}
+			},
+			expectCount: 1, // Only count blobs for stream 1
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+				// Arrange
+				uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+				require.NotNil(tb, uploadsvc)
+
+				// Setup test data
+				tt.setupData(ctx)
+
+				// Act
+				count, err := uploadsvc.GetPendingBlobCount(context.Background(), tt.userID, tt.streamID)
+
+				// Assert
+				if tt.expectError {
+					assert.Error(tb, err)
+				} else {
+					assert.NoError(tb, err)
+					assert.Equal(tb, tt.expectCount, count)
+				}
+			}, getTestOptions())
+		})
+	}
+}
+
+func TestUploadService_RaceConditionHandling(t *testing.T) {
+	tests := []struct {
+		name string
+		test func(t *testing.T, ctx coreTesting.TestContext)
+	}{
+		{
+			name: "BlobFirst_ThenSDBlob",
+			test: func(t *testing.T, ctx coreTesting.TestContext) {
+				uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+				require.NotNil(t, uploadsvc)
+
+				testCtx := context.Background()
+				userID := uint(123)
+				deviceID := uint(456)
+				streamID := uint(789)
+
+				// Create test blob info
+				blobHashBytes := make([]byte, 32)
+				for i := range blobHashBytes {
+					blobHashBytes[i] = byte(i)
+				}
+				blobHash := hex.EncodeToString(blobHashBytes)
+
+				blobInfo := &stream.BlobInfo{
+					BlobHash: blobHashBytes,
+					Length:   1024,
+					BlobNum:  1,
+					IV:       []byte("test-iv-data"),
+				}
+
+				// Clean up before test
+				err := ctx.DB().Where("user_id = ?", userID).Delete(&pluginDb.PendingBlob{}).Error
+				require.NoError(t, err)
+
+				// Step 1: Upload blob first (marks as received=true)
+				err = uploadsvc.StorePendingBlob(testCtx, userID, deviceID, streamID, blobInfo)
+				require.NoError(t, err)
+
+				// Verify blob is marked as received
+				var pendingBlob pluginDb.PendingBlob
+				err = ctx.DB().Where("user_id = ? AND blob_hash = ?", userID, blobHash).First(&pendingBlob).Error
+				require.NoError(t, err)
+				assert.True(t, pendingBlob.Received, "Blob should be marked as received when uploaded first")
+
+				// Step 2: Process SD blob (should not change received back to false)
+				// Simulate SD blob processing by updating only stream_id (like createPendingBlobsFromSDBlob does)
+				err = ctx.DB().Model(&pluginDb.PendingBlob{}).Where("user_id = ? AND blob_hash = ?", userID, blobHash).Updates(map[string]interface{}{
+					"stream_id": streamID,
+				}).Error
+				require.NoError(t, err)
+
+				// Verify blob is still marked as received (race condition protection)
+				err = ctx.DB().Where("user_id = ? AND blob_hash = ?", userID, blobHash).First(&pendingBlob).Error
+				require.NoError(t, err)
+				assert.True(t, pendingBlob.Received, "Blob should remain marked as received after SD blob processing")
+			},
+		},
+		{
+			name: "SDBlobFirst_ThenBlob",
+			test: func(t *testing.T, ctx coreTesting.TestContext) {
+				uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+				require.NotNil(t, uploadsvc)
+
+				testCtx := context.Background()
+				userID := uint(123)
+				deviceID := uint(456)
+				streamID := uint(789)
+
+				// Create test blob info
+				blobHashBytes := make([]byte, 32)
+				for i := range blobHashBytes {
+					blobHashBytes[i] = byte(i)
+				}
+				blobHash := hex.EncodeToString(blobHashBytes)
+
+				blobInfo := &stream.BlobInfo{
+					BlobHash: blobHashBytes,
+					Length:   1024,
+					BlobNum:  1,
+					IV:       []byte("test-iv-data"),
+				}
+
+				// Clean up before test
+				err := ctx.DB().Where("user_id = ?", userID).Delete(&pluginDb.PendingBlob{}).Error
+				require.NoError(t, err)
+
+				// Step 1: Process SD blob first (creates record with received=false)
+				// Create pending blob record manually to simulate SD blob processing
+				pendingBlob := pluginDb.PendingBlob{
+					BlobHash:   blobHash,
+					UserID:     userID,
+					DeviceID:   deviceID,
+					StreamID:   streamID,
+					BlobSize:   int(blobInfo.Length),
+					BlobNumber: blobInfo.BlobNum,
+					Received:   false, // Mark as not received yet - waiting for upload
+					IVData:     blobInfo.IV,
+				}
+
+				err = ctx.DB().Create(&pendingBlob).Error
+				require.NoError(t, err)
+
+				// Verify blob is initially marked as not received
+				var savedBlob pluginDb.PendingBlob
+				err = ctx.DB().Where("user_id = ? AND blob_hash = ?", userID, blobHash).First(&savedBlob).Error
+				require.NoError(t, err)
+				assert.False(t, savedBlob.Received, "Blob should be marked as not received when SD blob processed first")
+
+				// Step 2: Upload blob (marks as received=true)
+				err = uploadsvc.StorePendingBlob(testCtx, userID, deviceID, streamID, blobInfo)
+				require.NoError(t, err)
+
+				// Verify blob is now marked as received
+				err = ctx.DB().Where("user_id = ? AND blob_hash = ?", userID, blobHash).First(&savedBlob).Error
+				require.NoError(t, err)
+				assert.True(t, savedBlob.Received, "Blob should be marked as received when uploaded after SD blob")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+				tt.test(t, ctx)
 			}, getTestOptions())
 		})
 	}
@@ -340,7 +588,7 @@ func TestUploadServiceDefault_DeleteStream_EdgeCases(t *testing.T) {
 			setupData: func(ctx coreTesting.TestContext) (string, error) {
 				streams, _, _ := setupTestStreamData(ctx, 1)
 				// Simulate another user deleting their pin first
-				err := ctx.DB().Where("user_id = ? AND stream_id = ?", 999, streams[0].ID).Delete(&db.StreamPin{}).Error
+				err := ctx.DB().Where("user_id = ? AND stream_id = ?", 999, streams[0].ID).Delete(&pluginDb.StreamPin{}).Error
 				if err != nil {
 					return "", err
 				}
@@ -389,7 +637,7 @@ func TestUploadServiceDefault_DeleteStream_EdgeCases(t *testing.T) {
 
 				// Get SD hash if needed
 				if tt.sdHash == "" && !tt.skipSDHashLookup {
-					var streamRecord db.Stream
+					var streamRecord pluginDb.Stream
 					err = ctx.DB().First(&streamRecord).Error
 					require.NoError(tb, err)
 					tt.sdHash = streamRecord.SDHash
@@ -448,7 +696,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 			description: "should successfully delete user's stream pin only",
 			verifyCleanup: func(ctx coreTesting.TestContext, sdHash string) error {
 				// Find stream by SD hash first
-				var stream db.Stream
+				var stream pluginDb.Stream
 				err := ctx.DB().Where("sd_hash = ?", sdHash).First(&stream).Error
 				if err != nil {
 					return fmt.Errorf("failed to find stream: %w", err)
@@ -456,7 +704,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 
 				// Verify user's stream pin is deleted
 				var pinCount int64
-				err = ctx.DB().Model(&db.StreamPin{}).Where("user_id = ? AND stream_id = ?", 1, stream.ID).Count(&pinCount).Error
+				err = ctx.DB().Model(&pluginDb.StreamPin{}).Where("user_id = ? AND stream_id = ?", 1, stream.ID).Count(&pinCount).Error
 				if err != nil {
 					return err
 				}
@@ -466,7 +714,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 
 				// Verify stream and blobs still exist (new behavior - they are not deleted)
 				var streamCount int64
-				err = ctx.DB().Model(&db.Stream{}).Where("sd_hash = ?", sdHash).Count(&streamCount).Error
+				err = ctx.DB().Model(&pluginDb.Stream{}).Where("sd_hash = ?", sdHash).Count(&streamCount).Error
 				if err != nil {
 					return err
 				}
@@ -475,14 +723,14 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 				}
 
 				// Find stream by SD hash first
-				var streamForBlobs db.Stream
+				var streamForBlobs pluginDb.Stream
 				err = ctx.DB().Where("sd_hash = ?", sdHash).First(&streamForBlobs).Error
 				if err != nil {
 					return fmt.Errorf("failed to find stream for blob check: %w", err)
 				}
 
 				var blobCount int64
-				err = ctx.DB().Model(&db.StreamBlob{}).Where("stream_id = ?", streamForBlobs.ID).Count(&blobCount).Error
+				err = ctx.DB().Model(&pluginDb.StreamBlob{}).Where("stream_id = ?", streamForBlobs.ID).Count(&blobCount).Error
 				if err != nil {
 					return err
 				}
@@ -506,7 +754,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 			description: "should delete only user's pin when stream has multiple pins",
 			verifyCleanup: func(ctx coreTesting.TestContext, sdHash string) error {
 				// Find stream by SD hash first
-				var stream db.Stream
+				var stream pluginDb.Stream
 				err := ctx.DB().Where("sd_hash = ?", sdHash).First(&stream).Error
 				if err != nil {
 					return fmt.Errorf("failed to find stream: %w", err)
@@ -514,7 +762,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 
 				// Verify user's pin is deleted
 				var userPinCount int64
-				err = ctx.DB().Model(&db.StreamPin{}).Where("user_id = ? AND stream_id = ?", 1, stream.ID).Count(&userPinCount).Error
+				err = ctx.DB().Model(&pluginDb.StreamPin{}).Where("user_id = ? AND stream_id = ?", 1, stream.ID).Count(&userPinCount).Error
 				if err != nil {
 					return err
 				}
@@ -524,7 +772,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 
 				// Verify other user's pin still exists
 				var otherPinCount int64
-				err = ctx.DB().Model(&db.StreamPin{}).Where("user_id = ? AND stream_id = ?", 999, stream.ID).Count(&otherPinCount).Error
+				err = ctx.DB().Model(&pluginDb.StreamPin{}).Where("user_id = ? AND stream_id = ?", 999, stream.ID).Count(&otherPinCount).Error
 				if err != nil {
 					return err
 				}
@@ -534,7 +782,7 @@ func TestUploadServiceDefault_DeleteStream(t *testing.T) {
 
 				// Verify stream and blobs still exist (new behavior - they are never deleted)
 				var streamCount int64
-				err = ctx.DB().Model(&db.Stream{}).Where("sd_hash = ?", sdHash).Count(&streamCount).Error
+				err = ctx.DB().Model(&pluginDb.Stream{}).Where("sd_hash = ?", sdHash).Count(&streamCount).Error
 				if err != nil {
 					return err
 				}
@@ -778,7 +1026,7 @@ func TestUploadServiceDefault_ProcessUpload(t *testing.T) {
 func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 	tests := []struct {
 		name              string
-		setupStream       func(ctx coreTesting.TestContext) *db.Stream
+		setupStream       func(ctx coreTesting.TestContext) *pluginDb.Stream
 		mockCIDError      error
 		expectError       bool
 		expectedErrorText string
@@ -786,7 +1034,7 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 	}{
 		{
 			name: "successful stream pin creation",
-			setupStream: func(ctx coreTesting.TestContext) *db.Stream {
+			setupStream: func(ctx coreTesting.TestContext) *pluginDb.Stream {
 				// Create a stream using helper function
 				return createTestStream(ctx, "test_stream", testUploadHash1)
 			},
@@ -795,7 +1043,7 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 		},
 		{
 			name: "stream not found error",
-			setupStream: func(ctx coreTesting.TestContext) *db.Stream {
+			setupStream: func(ctx coreTesting.TestContext) *pluginDb.Stream {
 				// Don't create stream in DB - this should cause a not found error
 				return nil
 			},
@@ -805,7 +1053,7 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 
 		{
 			name: "CID conversion error",
-			setupStream: func(ctx coreTesting.TestContext) *db.Stream {
+			setupStream: func(ctx coreTesting.TestContext) *pluginDb.Stream {
 				// Create a stream using helper function
 				return createTestStream(ctx, "test_stream", testUploadHash1)
 			},
@@ -824,13 +1072,13 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 				require.NotNil(tb, uploadsvc)
 
 				// Setup test data
-				var _stream *db.Stream
+				var _stream *pluginDb.Stream
 				if tt.setupStream != nil {
 					_stream = tt.setupStream(ctx)
 				}
 
 				// Act
-				var result *db.StreamPin
+				var result *pluginDb.StreamPin
 				var err error
 
 				if tt.mockCIDError != nil {
@@ -899,8 +1147,8 @@ func (r *errorReader) Close() error {
 }
 
 // Helper functions for creating test data
-func createTestStream(ctx coreTesting.TestContext, streamName, sdHash string) *db.Stream {
-	stream := &db.Stream{
+func createTestStream(ctx coreTesting.TestContext, streamName, sdHash string) *pluginDb.Stream {
+	stream := &pluginDb.Stream{
 		StreamHash:        sdHash,
 		SDHash:            sdHash,
 		StreamName:        streamName,
@@ -914,8 +1162,8 @@ func createTestStream(ctx coreTesting.TestContext, streamName, sdHash string) *d
 	return stream
 }
 
-func createTestStreamPin(ctx coreTesting.TestContext, userID uint64, streamID uint64) *db.StreamPin {
-	pin := &db.StreamPin{
+func createTestStreamPin(ctx coreTesting.TestContext, userID uint64, streamID uint64) *pluginDb.StreamPin {
+	pin := &pluginDb.StreamPin{
 		UserID:   userID,
 		StreamID: streamID,
 	}
@@ -926,8 +1174,8 @@ func createTestStreamPin(ctx coreTesting.TestContext, userID uint64, streamID ui
 	return pin
 }
 
-func createTestStreamBlob(ctx coreTesting.TestContext, streamID uint64, blobID uint64, blobNumber int) *db.StreamBlob {
-	blob := &db.StreamBlob{
+func createTestStreamBlob(ctx coreTesting.TestContext, streamID uint64, blobID uint64, blobNumber int) *pluginDb.StreamBlob {
+	blob := &pluginDb.StreamBlob{
 		StreamID:   streamID,
 		BlobID:     blobID,
 		BlobNumber: blobNumber,
@@ -940,8 +1188,8 @@ func createTestStreamBlob(ctx coreTesting.TestContext, streamID uint64, blobID u
 }
 
 // Helper functions for creating test pending data
-func createTestPendingBlob(ctx coreTesting.TestContext, userID, deviceID, streamID uint, blobHash string, blobSize, blobNumber int, received bool, iv []byte) *db.PendingBlob {
-	pendingBlob := &db.PendingBlob{
+func createTestPendingBlob(ctx coreTesting.TestContext, userID, deviceID, streamID uint, blobHash string, blobSize, blobNumber int, received bool, iv []byte) *pluginDb.PendingBlob {
+	pendingBlob := &pluginDb.PendingBlob{
 		BlobHash:   blobHash,
 		UserID:     userID,
 		DeviceID:   deviceID,
@@ -958,8 +1206,8 @@ func createTestPendingBlob(ctx coreTesting.TestContext, userID, deviceID, stream
 	return pendingBlob
 }
 
-func createTestPendingStream(ctx coreTesting.TestContext, userID, deviceID uint, streamHash, sdHash, streamName, streamType, suggestedFileName string, keyData []byte) *db.PendingStream {
-	pendingStream := &db.PendingStream{
+func createTestPendingStream(ctx coreTesting.TestContext, userID, deviceID uint, streamHash, sdHash, streamName, streamType, suggestedFileName string, keyData []byte) *pluginDb.PendingStream {
+	pendingStream := &pluginDb.PendingStream{
 		StreamHash:        streamHash,
 		SDHash:            sdHash,
 		StreamName:        streamName,
@@ -976,23 +1224,23 @@ func createTestPendingStream(ctx coreTesting.TestContext, userID, deviceID uint,
 	return pendingStream
 }
 
-func setupTestStreamData(ctx coreTesting.TestContext, userID uint64) ([]*db.Stream, []*db.StreamPin, []*db.StreamBlob) {
+func setupTestStreamData(ctx coreTesting.TestContext, userID uint64) ([]*pluginDb.Stream, []*pluginDb.StreamPin, []*pluginDb.StreamBlob) {
 	// Create test streams
 	stream1 := createTestStream(ctx, "test_stream_1", testUploadHash1)
 	stream2 := createTestStream(ctx, "test_stream_2", testUploadHash2)
 	stream3 := createTestStream(ctx, "another_stream", testUploadHash3)
-	streams := []*db.Stream{stream1, stream2, stream3}
+	streams := []*pluginDb.Stream{stream1, stream2, stream3}
 
 	// Create stream pins for user 1
 	pin1 := createTestStreamPin(ctx, userID, uint64(stream1.ID))
 	pin2 := createTestStreamPin(ctx, userID, uint64(stream2.ID))
-	pins := []*db.StreamPin{pin1, pin2}
+	pins := []*pluginDb.StreamPin{pin1, pin2}
 
 	// Create stream blobs
 	blob1 := createTestStreamBlob(ctx, uint64(stream1.ID), 1001, 1)
 	blob2 := createTestStreamBlob(ctx, uint64(stream1.ID), 1002, 2)
 	blob3 := createTestStreamBlob(ctx, uint64(stream2.ID), 2001, 1)
-	blobs := []*db.StreamBlob{blob1, blob2, blob3}
+	blobs := []*pluginDb.StreamBlob{blob1, blob2, blob3}
 
 	// Create a pin for another user to test shared streams
 	otherUserPin := createTestStreamPin(ctx, 999, uint64(stream1.ID))
@@ -1092,7 +1340,7 @@ func TestUploadServiceDefault_StorePendingBlob(t *testing.T) {
 					assert.NoError(tb, err)
 
 					// Verify the pending blob was stored/updated correctly
-					var pendingBlob db.PendingBlob
+					var pendingBlob pluginDb.PendingBlob
 					err = ctx.DB().Where("user_id = ? AND blob_hash = ?", tt.userID, hex.EncodeToString(tt.blobInfo.BlobHash)).First(&pendingBlob).Error
 					assert.NoError(tb, err)
 					assert.Equal(tb, tt.userID, pendingBlob.UserID)
@@ -1101,6 +1349,144 @@ func TestUploadServiceDefault_StorePendingBlob(t *testing.T) {
 					assert.Equal(tb, tt.blobInfo.BlobNum, pendingBlob.BlobNumber)
 					assert.True(tb, pendingBlob.Received)
 					assert.Equal(tb, tt.blobInfo.IV, pendingBlob.IVData)
+				}
+			}, getTestOptions())
+		})
+	}
+}
+
+func TestUploadServiceDefault_MarkPendingBlobAsReceived(t *testing.T) {
+	tests := []struct {
+		name          string
+		userID        uint
+		deviceID      uint
+		blobInfo      *stream.BlobInfo
+		setupData     func(ctx coreTesting.TestContext) (uint, error) // Returns streamID
+		expectError   bool
+		expectedError string
+		description   string
+	}{
+		{
+			name:     "mark existing pending blob as received",
+			userID:   1,
+			deviceID: 1,
+			blobInfo: &stream.BlobInfo{
+				BlobHash: []byte(testUploadHash3),
+				Length:   1024,
+				BlobNum:  1,
+				IV:       []byte("test_iv"),
+			},
+			setupData: func(ctx coreTesting.TestContext) (uint, error) {
+				// Create a pending stream first
+				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, "test_sd_hash", "test_stream", "lbryfile", "test_file.txt", []byte("test_key"))
+				// Create existing pending blob with Received=false
+				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, hex.EncodeToString([]byte(testUploadHash3)), 1024, 1, false, []byte("test_iv"))
+				return pendingStream.ID, nil
+			},
+			expectError: false,
+			description: "should mark existing pending blob as received without changing stream_id",
+		},
+		{
+			name:     "mark terminating blob as received",
+			userID:   1,
+			deviceID: 1,
+			blobInfo: &stream.BlobInfo{
+				BlobHash: []byte{}, // Empty hash indicates terminating blob
+				Length:   0,
+				BlobNum:  99,
+				IV:       nil,
+			},
+			setupData: func(ctx coreTesting.TestContext) (uint, error) {
+				// Create a pending stream first
+				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, "test_sd_hash", "test_stream", "lbryfile", "test_file.txt", []byte("test_key"))
+				return pendingStream.ID, nil
+			},
+			expectError: false,
+			description: "should mark terminating blob as received with empty hash",
+		},
+		{
+			name:     "mark non-existent pending blob as received",
+			userID:   1,
+			deviceID: 1,
+			blobInfo: &stream.BlobInfo{
+				BlobHash: []byte(testUploadHash4),
+				Length:   2048,
+				BlobNum:  2,
+				IV:       []byte("new_iv"),
+			},
+			setupData: func(ctx coreTesting.TestContext) (uint, error) {
+				// Create a pending stream but don't create the pending blob
+				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, "test_sd_hash", "test_stream", "lbryfile", "test_file.txt", []byte("test_key"))
+				return pendingStream.ID, nil
+			},
+			expectError: false,
+			description: "should create new pending blob marked as received",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+				// Arrange
+				uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+				require.NotNil(tb, uploadsvc)
+
+				// Setup test data if needed
+				var originalStreamID uint
+				if tt.setupData != nil {
+					var err error
+					_, err = tt.setupData(ctx)
+					require.NoError(tb, err)
+
+					// Get original stream_id if blob exists
+					var pendingBlob pluginDb.PendingBlob
+					blobHash := hex.EncodeToString(tt.blobInfo.BlobHash)
+					if blobHash != "" {
+						err = ctx.DB().Where("user_id = ? AND blob_hash = ?", tt.userID, blobHash).First(&pendingBlob).Error
+						if err == nil {
+							originalStreamID = pendingBlob.StreamID
+						}
+					}
+				}
+
+				// Act
+				err := uploadsvc.MarkPendingBlobAsReceived(context.Background(), tt.userID, tt.deviceID, tt.blobInfo)
+
+				// Assert
+				if tt.expectError {
+					assert.Error(tb, err)
+					if tt.expectedError != "" {
+						assert.Contains(tb, err.Error(), tt.expectedError)
+					}
+				} else {
+					assert.NoError(tb, err)
+
+					// Verify the pending blob was marked as received correctly
+					var updatedPendingBlob pluginDb.PendingBlob
+					blobHash := hex.EncodeToString(tt.blobInfo.BlobHash)
+					if blobHash == "" {
+						// For terminating blobs, we need to find the generated hash
+						err = ctx.DB().Where("user_id = ? AND terminating = ? AND received = ?", tt.userID, true, true).First(&updatedPendingBlob).Error
+					} else {
+						err = ctx.DB().Where("user_id = ? AND blob_hash = ?", tt.userID, blobHash).First(&updatedPendingBlob).Error
+					}
+					assert.NoError(tb, err)
+					assert.Equal(tb, tt.userID, updatedPendingBlob.UserID)
+					assert.Equal(tb, tt.deviceID, updatedPendingBlob.DeviceID)
+					assert.Equal(tb, int(tt.blobInfo.Length), updatedPendingBlob.BlobSize)
+					assert.Equal(tb, tt.blobInfo.BlobNum, updatedPendingBlob.BlobNumber)
+					assert.True(tb, updatedPendingBlob.Received)
+					assert.Equal(tb, tt.blobInfo.IV, updatedPendingBlob.IVData)
+
+					// For terminating blobs, check that terminating flag is set
+					if len(tt.blobInfo.BlobHash) == 0 {
+						assert.True(tb, updatedPendingBlob.Terminating)
+					}
+
+					// Critical test: verify stream_id is preserved for existing blobs
+					if originalStreamID != 0 {
+						assert.Equal(tb, originalStreamID, updatedPendingBlob.StreamID, "stream_id should be preserved for existing blobs")
+					}
 				}
 			}, getTestOptions())
 		})
@@ -1233,7 +1619,7 @@ func TestUploadServiceDefault_StorePendingStream(t *testing.T) {
 					assert.NoError(tb, err)
 
 					// Verify the pending stream was stored/updated correctly
-					var pendingStream db.PendingStream
+					var pendingStream pluginDb.PendingStream
 					err = ctx.DB().Where("user_id = ? AND sd_hash = ?", tt.userID, tt.sdHash).First(&pendingStream).Error
 					assert.NoError(tb, err)
 					assert.Equal(tb, tt.userID, pendingStream.UserID)
@@ -1253,7 +1639,7 @@ func TestUploadServiceDefault_StorePendingStream(t *testing.T) {
 							expectedBlobHashes[i] = hex.EncodeToString(blobInfo.BlobHash)
 						}
 
-						var pendingBlobs []db.PendingBlob
+						var pendingBlobs []pluginDb.PendingBlob
 						// Query pending blobs by user ID and blob hashes (IN clause)
 						err = ctx.DB().Where("user_id = ? AND blob_hash IN ?", tt.userID, expectedBlobHashes).Find(&pendingBlobs).Error
 						assert.NoError(tb, err)
@@ -1451,7 +1837,7 @@ func TestUploadServiceDefault_CleanupPendingBlobs(t *testing.T) {
 
 				// Capture initial blob count before cleanup
 				var initialBlobs int64
-				err := ctx.DB().Model(&db.PendingBlob{}).Where("user_id = ?", tt.userID).Count(&initialBlobs).Error
+				err := ctx.DB().Model(&pluginDb.PendingBlob{}).Where("user_id = ?", tt.userID).Count(&initialBlobs).Error
 				require.NoError(tb, err)
 
 				// Act
@@ -1469,7 +1855,7 @@ func TestUploadServiceDefault_CleanupPendingBlobs(t *testing.T) {
 					// Verify cleanup was successful
 					// Check pending blobs are deleted
 					var remainingBlobs int64
-					err = ctx.DB().Model(&db.PendingBlob{}).Where("user_id = ?", tt.userID).Count(&remainingBlobs).Error
+					err = ctx.DB().Model(&pluginDb.PendingBlob{}).Where("user_id = ?", tt.userID).Count(&remainingBlobs).Error
 					assert.NoError(tb, err)
 
 					expectedBlobs := 0
@@ -1481,7 +1867,7 @@ func TestUploadServiceDefault_CleanupPendingBlobs(t *testing.T) {
 
 					// Check pending stream is deleted
 					var remainingStreams int64
-					err = ctx.DB().Model(&db.PendingStream{}).Where("user_id = ? AND sd_hash = ?", tt.userID, tt.streamResult.SDBlobHash).Count(&remainingStreams).Error
+					err = ctx.DB().Model(&pluginDb.PendingStream{}).Where("user_id = ? AND sd_hash = ?", tt.userID, tt.streamResult.SDBlobHash).Count(&remainingStreams).Error
 					assert.NoError(tb, err)
 					assert.Equal(tb, int64(0), remainingStreams)
 				}

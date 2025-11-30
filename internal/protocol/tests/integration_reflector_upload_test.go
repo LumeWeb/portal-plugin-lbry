@@ -152,7 +152,7 @@ func uploadStreamToReflector(ctx coreTesting.TestContext, streamResult *stream.S
 // createDeviceViaAPI creates a device via the API endpoint
 func createDeviceViaAPI(ctx coreTesting.TestContext, token, name, ipAddress string) (string, error) {
 	// Create the device request payload
-	requestBody := map[string]interface{}{
+	requestBody := map[string]any{
 		"name":       name,
 		"ip_address": ipAddress,
 	}

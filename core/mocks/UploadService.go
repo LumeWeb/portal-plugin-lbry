@@ -322,6 +322,78 @@ func (_c *MockUploadService_GetMissingBlobs_Call) RunAndReturn(run func(ctx cont
 	return _c
 }
 
+// GetPendingBlobCount provides a mock function for the type MockUploadService
+func (_mock *MockUploadService) GetPendingBlobCount(ctx context.Context, userID uint, streamID uint) (int64, error) {
+	ret := _mock.Called(ctx, userID, streamID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetPendingBlobCount")
+	}
+
+	var r0 int64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, uint) (int64, error)); ok {
+		return returnFunc(ctx, userID, streamID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, uint) int64); ok {
+		r0 = returnFunc(ctx, userID, streamID)
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uint, uint) error); ok {
+		r1 = returnFunc(ctx, userID, streamID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockUploadService_GetPendingBlobCount_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPendingBlobCount'
+type MockUploadService_GetPendingBlobCount_Call struct {
+	*mock.Call
+}
+
+// GetPendingBlobCount is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userID uint
+//   - streamID uint
+func (_e *MockUploadService_Expecter) GetPendingBlobCount(ctx interface{}, userID interface{}, streamID interface{}) *MockUploadService_GetPendingBlobCount_Call {
+	return &MockUploadService_GetPendingBlobCount_Call{Call: _e.mock.On("GetPendingBlobCount", ctx, userID, streamID)}
+}
+
+func (_c *MockUploadService_GetPendingBlobCount_Call) Run(run func(ctx context.Context, userID uint, streamID uint)) *MockUploadService_GetPendingBlobCount_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 uint
+		if args[2] != nil {
+			arg2 = args[2].(uint)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *MockUploadService_GetPendingBlobCount_Call) Return(n int64, err error) *MockUploadService_GetPendingBlobCount_Call {
+	_c.Call.Return(n, err)
+	return _c
+}
+
+func (_c *MockUploadService_GetPendingBlobCount_Call) RunAndReturn(run func(ctx context.Context, userID uint, streamID uint) (int64, error)) *MockUploadService_GetPendingBlobCount_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPendingBlobs provides a mock function for the type MockUploadService
 func (_mock *MockUploadService) GetPendingBlobs(ctx context.Context, userID uint, sdHash string) ([]*db.PendingBlob, error) {
 	ret := _mock.Called(ctx, userID, sdHash)
@@ -674,6 +746,75 @@ func (_c *MockUploadService_ListStreams_Call) Return(streams []*db.Stream, n int
 }
 
 func (_c *MockUploadService_ListStreams_Call) RunAndReturn(run func(ctx context.Context, userID uint, filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Stream, int64, error)) *MockUploadService_ListStreams_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// MarkPendingBlobAsReceived provides a mock function for the type MockUploadService
+func (_mock *MockUploadService) MarkPendingBlobAsReceived(ctx context.Context, userID uint, deviceID uint, blobInfo *stream.BlobInfo) error {
+	ret := _mock.Called(ctx, userID, deviceID, blobInfo)
+
+	if len(ret) == 0 {
+		panic("no return value specified for MarkPendingBlobAsReceived")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uint, uint, *stream.BlobInfo) error); ok {
+		r0 = returnFunc(ctx, userID, deviceID, blobInfo)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockUploadService_MarkPendingBlobAsReceived_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MarkPendingBlobAsReceived'
+type MockUploadService_MarkPendingBlobAsReceived_Call struct {
+	*mock.Call
+}
+
+// MarkPendingBlobAsReceived is a helper method to define mock.On call
+//   - ctx context.Context
+//   - userID uint
+//   - deviceID uint
+//   - blobInfo *stream.BlobInfo
+func (_e *MockUploadService_Expecter) MarkPendingBlobAsReceived(ctx interface{}, userID interface{}, deviceID interface{}, blobInfo interface{}) *MockUploadService_MarkPendingBlobAsReceived_Call {
+	return &MockUploadService_MarkPendingBlobAsReceived_Call{Call: _e.mock.On("MarkPendingBlobAsReceived", ctx, userID, deviceID, blobInfo)}
+}
+
+func (_c *MockUploadService_MarkPendingBlobAsReceived_Call) Run(run func(ctx context.Context, userID uint, deviceID uint, blobInfo *stream.BlobInfo)) *MockUploadService_MarkPendingBlobAsReceived_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 uint
+		if args[1] != nil {
+			arg1 = args[1].(uint)
+		}
+		var arg2 uint
+		if args[2] != nil {
+			arg2 = args[2].(uint)
+		}
+		var arg3 *stream.BlobInfo
+		if args[3] != nil {
+			arg3 = args[3].(*stream.BlobInfo)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *MockUploadService_MarkPendingBlobAsReceived_Call) Return(err error) *MockUploadService_MarkPendingBlobAsReceived_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *MockUploadService_MarkPendingBlobAsReceived_Call) RunAndReturn(run func(ctx context.Context, userID uint, deviceID uint, blobInfo *stream.BlobInfo) error) *MockUploadService_MarkPendingBlobAsReceived_Call {
 	_c.Call.Return(run)
 	return _c
 }
