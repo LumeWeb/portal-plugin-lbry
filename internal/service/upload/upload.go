@@ -712,6 +712,49 @@ func isDuplicateKeyError(err error) bool {
 		strings.Contains(errMsg, "unique constraint")
 }
 
+// ensureActivePin finds an existing pin (including soft-deleted) and ensures it's active
+// Returns the pin if found/restored, or gorm.ErrRecordNotFound if not found
+func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, streamID uint, sdHash string) (*db.StreamPin, error) {
+	var pin db.StreamPin
+	err := s.db.WithContext(ctx).
+		Unscoped().
+		Where("user_id = ? AND stream_id = ?", userId, streamID).
+		First(&pin).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// If pin is soft-deleted, restore it
+	if pin.DeletedAt.Valid {
+		err = s.db.WithContext(ctx).Unscoped().Model(&pin).Update("deleted_at", nil).Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to restore soft-deleted stream pin: %w", err)
+		}
+
+		s.logger.Info("Restored soft-deleted stream pin",
+			zap.Uint("userID", userId),
+			zap.Uint("streamID", streamID),
+			zap.Uint64("pinID", uint64(pin.ID)),
+			zap.String("sdHash", sdHash),
+			zap.Time("deletedAt", pin.DeletedAt.Time))
+
+		// Reload the pin to reflect the updated state
+		err = s.db.WithContext(ctx).First(&pin, pin.ID).Error
+		if err != nil {
+			return nil, fmt.Errorf("failed to reload restored stream pin: %w", err)
+		}
+	} else {
+		s.logger.Debug("Stream pin already exists, returning existing pin",
+			zap.Uint("userID", userId),
+			zap.Uint("streamID", streamID),
+			zap.Uint64("pinID", uint64(pin.ID)),
+			zap.String("sdHash", sdHash))
+	}
+
+	return &pin, nil
+}
+
 // CreateStreamPin creates an LBRY stream pin record
 func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint, sdCid cid.Cid) (*db.StreamPin, error) {
 	// Convert CID to stream hash string
@@ -730,21 +773,12 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 		return nil, fmt.Errorf("failed to find stream %s: %w", sdHash, err)
 	}
 
-	// Check if pin already exists (idempotence check)
-	var existingPin db.StreamPin
-	err = s.db.WithContext(ctx).
-		Where("user_id = ? AND stream_id = ?", userId, _stream.ID).
-		First(&existingPin).Error
-
+	// Try to find and ensure an existing pin is active
+	existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
 	if err == nil {
-		// Pin already exists, return existing pin (idempotent operation)
-		s.logger.Debug("Stream pin already exists, returning existing pin",
-			zap.Uint("userID", userId),
-			zap.Uint("streamID", _stream.ID),
-			zap.String("sdHash", sdHash))
-		return &existingPin, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		// Some other error occurred
+		return existingPin, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, fmt.Errorf("failed to check existing stream pin: %w", err)
 	}
 
@@ -756,23 +790,19 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 
 	// Save the StreamPin to the database with duplicate handling
 	if err = s.db.WithContext(ctx).Create(streamPin).Error; err != nil {
-		// Check if this is a duplicate key/constraint error
+		// Handle race condition where another request created the pin concurrently
 		if isDuplicateKeyError(err) {
-			// If it's a duplicate, the pin was created by another concurrent request
-			// Fetch and return the existing pin
-			var existingPin db.StreamPin
-			err = s.db.WithContext(ctx).
-				Where("user_id = ? AND stream_id = ?", userId, _stream.ID).
-				First(&existingPin).Error
-			if err != nil {
-				return nil, fmt.Errorf("failed to fetch existing stream pin after duplicate constraint: %w", err)
-			}
-
-			s.logger.Debug("Stream pin created by concurrent request, returning existing pin",
+			s.logger.Debug("Stream pin created by concurrent request, fetching existing pin",
 				zap.Uint("userID", userId),
 				zap.Uint("streamID", _stream.ID),
 				zap.String("sdHash", sdHash))
-			return &existingPin, nil
+
+			// Use the helper to find and ensure the pin is active
+			existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch existing stream pin after duplicate constraint: %w", err)
+			}
+			return existingPin, nil
 		}
 		return nil, fmt.Errorf("failed to create stream pin: %w", err)
 	}
@@ -852,7 +882,7 @@ func (s *UploadServiceDefault) GetPendingBlobs(ctx context.Context, userID uint,
 	return pendingBlobs, nil
 }
 
-// DeleteStream removes only the user's stream pin by SD hash
+// DeleteStream removes only the user's stream pin by SD hash (idempotent)
 func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sdHash string) error {
 	if userID == 0 {
 		return gorm.ErrRecordNotFound
@@ -868,24 +898,39 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 		return fmt.Errorf("failed to find stream: %w", err)
 	}
 
-	// Check if the stream pin exists and belongs to the user
+	// Check if the stream pin exists and belongs to the user (including soft-deleted)
 	streamPinQuery := db.StreamPin{
 		UserID:   uint64(userID),
 		StreamID: uint64(_stream.ID),
 	}
 	var streamPin db.StreamPin
 	err = s.db.WithContext(ctx).
+		Unscoped(). // Include soft-deleted records to check for restoration
 		Where(&streamPinQuery).
 		First(&streamPin).Error
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// Pin doesn't exist (Unscoped query includes soft-deleted records)
+			s.logger.Debug("Stream pin not found",
+				zap.Uint("userID", userID),
+				zap.Uint("streamID", _stream.ID),
+				zap.String("sdHash", sdHash))
 			return gorm.ErrRecordNotFound
 		}
 		return fmt.Errorf("failed to check stream ownership: %w", err)
 	}
 
-	// Delete only the stream pin record
+	// If the pin is already soft-deleted, return success (idempotent)
+	if streamPin.DeletedAt.Valid {
+		s.logger.Debug("Stream pin already deleted",
+			zap.Uint("userID", userID),
+			zap.Uint("streamID", _stream.ID),
+			zap.String("sdHash", sdHash))
+		return nil
+	}
+
+	// Delete only the stream pin record (soft delete)
 	if err := s.db.WithContext(ctx).
 		Where(&streamPinQuery).
 		Delete(&db.StreamPin{}).Error; err != nil {

@@ -1243,6 +1243,187 @@ func TestUploadServiceDefault_CreateStreamPin(t *testing.T) {
 	}
 }
 
+func TestUploadServiceDefault_CreateStreamPin_RestoreSoftDeleted(t *testing.T) {
+	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+		require.NotNil(tb, uploadsvc)
+
+		// Create a test stream
+		testStream := createTestStream(ctx, "test_stream", testUploadHash1)
+		require.NotNil(tb, testStream)
+
+		// Create a valid CID for testing
+		testCID := cid.MustParse(testUploadCID1)
+
+		// Act 1: Create initial stream pin
+		result1, err := uploadsvc.CreateStreamPin(context.Background(), 1, testCID)
+		require.NoError(tb, err)
+		require.NotNil(tb, result1)
+		assert.Equal(tb, uint64(1), result1.UserID)
+		assert.Equal(tb, uint64(testStream.ID), result1.StreamID)
+		assert.False(tb, result1.DeletedAt.Valid) // Should not be soft-deleted
+
+		// Act 2: Delete the stream pin (soft delete)
+		err = uploadsvc.DeleteStream(context.Background(), 1, testStream.SDHash)
+		require.NoError(tb, err)
+
+		// Verify the pin is soft-deleted
+		var deletedPin pluginDb.StreamPin
+		err = ctx.DB().Unscoped().
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			First(&deletedPin).Error
+		require.NoError(tb, err)
+		assert.True(tb, deletedPin.DeletedAt.Valid) // Should be soft-deleted
+
+		// Act 3: Try to create the stream pin again (should restore soft-deleted pin)
+		result2, err := uploadsvc.CreateStreamPin(context.Background(), 1, testCID)
+		require.NoError(tb, err)
+		require.NotNil(tb, result2)
+
+		// Assert: The restored pin should have the same ID but not be soft-deleted
+		assert.Equal(tb, result1.ID, result2.ID) // Same record ID
+		assert.Equal(tb, uint64(1), result2.UserID)
+		assert.Equal(tb, uint64(testStream.ID), result2.StreamID)
+		assert.False(tb, result2.DeletedAt.Valid) // Should not be soft-deleted anymore
+
+		// Verify there's only one pin record in the database (no duplicates)
+		var pinCount int64
+		err = ctx.DB().Unscoped().Model(&pluginDb.StreamPin{}).
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			Count(&pinCount).Error
+		require.NoError(tb, err)
+		assert.Equal(tb, int64(1), pinCount) // Should be exactly one pin
+	}, getTestOptions())
+}
+
+func TestUploadServiceDefault_DeleteStream_Idempotent(t *testing.T) {
+	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+		require.NotNil(tb, uploadsvc)
+
+		// Create a test stream
+		testStream := createTestStream(ctx, "test_stream", testUploadHash1)
+		require.NotNil(tb, testStream)
+
+		// Create initial stream pin
+		createTestStreamPin(ctx, 1, uint64(testStream.ID))
+
+		// Act 1: First deletion should succeed
+		err := uploadsvc.DeleteStream(context.Background(), 1, testStream.SDHash)
+		require.NoError(tb, err)
+
+		// Verify pin is soft-deleted after first deletion
+		var deletedPin pluginDb.StreamPin
+		err = ctx.DB().Unscoped().
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			First(&deletedPin).Error
+		require.NoError(tb, err)
+		assert.True(tb, deletedPin.DeletedAt.Valid, "Pin should be soft-deleted after first deletion")
+
+		// Act 2: Second deletion should also succeed (idempotent)
+		err = uploadsvc.DeleteStream(context.Background(), 1, testStream.SDHash)
+		assert.NoError(tb, err, "Second deletion should succeed (idempotent)")
+
+		// Verify pin is still soft-deleted (no hard delete occurred)
+		var stillDeletedPin pluginDb.StreamPin
+		err = ctx.DB().Unscoped().
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			First(&stillDeletedPin).Error
+		require.NoError(tb, err)
+		assert.True(tb, stillDeletedPin.DeletedAt.Valid, "Pin should still be soft-deleted after second deletion")
+		assert.Equal(tb, deletedPin.ID, stillDeletedPin.ID, "Should be same pin record")
+
+		// Act 3: Third deletion should also succeed (idempotent)
+		err = uploadsvc.DeleteStream(context.Background(), 1, testStream.SDHash)
+		assert.NoError(tb, err, "Third deletion should succeed (idempotent)")
+
+		// Verify there's still only one pin record (no duplicates created)
+		var pinCount int64
+		err = ctx.DB().Unscoped().Model(&pluginDb.StreamPin{}).
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			Count(&pinCount).Error
+		require.NoError(tb, err)
+		assert.Equal(tb, int64(1), pinCount, "Should be exactly one pin record")
+
+		// Verify pin is still soft-deleted
+		var finalPin pluginDb.StreamPin
+		err = ctx.DB().Unscoped().
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			First(&finalPin).Error
+		require.NoError(tb, err)
+		assert.True(tb, finalPin.DeletedAt.Valid, "Pin should still be soft-deleted after third deletion")
+		assert.Equal(tb, deletedPin.ID, finalPin.ID, "Should be same pin record throughout")
+	}, getTestOptions())
+}
+
+func TestUploadServiceDefault_DeleteStream_RestoreAndDeleteCycle(t *testing.T) {
+	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+		require.NotNil(tb, uploadsvc)
+
+		// Create a test stream
+		testStream := createTestStream(ctx, "test_stream", testUploadHash1)
+		require.NotNil(tb, testStream)
+
+		// Create a valid CID for testing
+		testCID := cid.MustParse(testUploadCID1)
+
+		// Act 1: Create initial stream pin
+		result1, err := uploadsvc.CreateStreamPin(context.Background(), 1, testCID)
+		require.NoError(tb, err)
+		require.NotNil(tb, result1)
+		assert.False(tb, result1.DeletedAt.Valid, "Initial pin should not be soft-deleted")
+
+		// Act 2: Delete the stream pin
+		err = uploadsvc.DeleteStream(context.Background(), 1, testStream.SDHash)
+		require.NoError(tb, err)
+
+		// Verify pin is soft-deleted
+		var deletedPin pluginDb.StreamPin
+		err = ctx.DB().Unscoped().
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			First(&deletedPin).Error
+		require.NoError(tb, err)
+		assert.True(tb, deletedPin.DeletedAt.Valid, "Pin should be soft-deleted")
+		assert.Equal(tb, result1.ID, deletedPin.ID, "Should be same pin record")
+
+		// Act 3: Recreate the stream pin (should restore soft-deleted pin)
+		result2, err := uploadsvc.CreateStreamPin(context.Background(), 1, testCID)
+		require.NoError(tb, err)
+		require.NotNil(tb, result2)
+
+		// Assert: The restored pin should have been the same record
+		assert.Equal(tb, result1.ID, result2.ID, "Should be same record ID after restoration")
+		assert.Equal(tb, uint64(1), result2.UserID)
+		assert.Equal(tb, uint64(testStream.ID), result2.StreamID)
+		assert.False(tb, result2.DeletedAt.Valid, "Restored pin should not be soft-deleted")
+
+		// Act 4: Delete the restored stream pin
+		err = uploadsvc.DeleteStream(context.Background(), 1, testStream.SDHash)
+		require.NoError(tb, err)
+
+		// Verify pin is soft-deleted again
+		var finalDeletedPin pluginDb.StreamPin
+		err = ctx.DB().Unscoped().
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			First(&finalDeletedPin).Error
+		require.NoError(tb, err)
+		assert.True(tb, finalDeletedPin.DeletedAt.Valid, "Pin should be soft-deleted again")
+		assert.Equal(tb, result1.ID, finalDeletedPin.ID, "Should be same record ID throughout")
+
+		// Verify there's only one pin record in database (no duplicates)
+		var pinCount int64
+		err = ctx.DB().Unscoped().Model(&pluginDb.StreamPin{}).
+			Where("user_id = ? AND stream_id = ?", 1, testStream.ID).
+			Count(&pinCount).Error
+		require.NoError(tb, err)
+		assert.Equal(tb, int64(1), pinCount, "Should be exactly one pin record throughout cycle")
+	}, getTestOptions())
+}
+
 // errorReader is a test helper that implements io.ReadSeekCloser and returns configurable errors
 type errorReader struct {
 	seekError        error
