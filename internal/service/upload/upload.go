@@ -740,10 +740,7 @@ func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, stre
 			zap.Time("deletedAt", pin.DeletedAt.Time))
 
 		// Reload the pin to reflect the updated state
-		err = s.db.WithContext(ctx).
-			Unscoped().
-			Where("id = ? AND user_id = ? AND stream_id = ?", pin.ID, userId, streamID).
-			First(&pin).Error
+		err = s.db.WithContext(ctx).First(&pin, pin.ID).Error
 		if err != nil {
 			return nil, fmt.Errorf("failed to reload restored stream pin: %w", err)
 		}
