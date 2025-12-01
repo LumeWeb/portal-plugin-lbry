@@ -741,7 +741,7 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 		// Pin exists, check if it's soft-deleted and restore if needed
 		if existingPin.DeletedAt.Valid {
 			// Restore the soft-deleted pin
-			err = s.db.WithContext(ctx).Model(&existingPin).Update("deleted_at", nil).Error
+			err = s.db.WithContext(ctx).Unscoped().Model(&existingPin).Update("deleted_at", nil).Error
 			if err != nil {
 				return nil, fmt.Errorf("failed to restore soft-deleted stream pin: %w", err)
 			}
@@ -752,6 +752,12 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 				zap.Uint64("pinID", uint64(existingPin.ID)),
 				zap.String("sdHash", sdHash),
 				zap.Time("deletedAt", existingPin.DeletedAt.Time))
+
+			// Reload the existingPin from DB to reflect the updated state
+			err = s.db.WithContext(ctx).Unscoped().Where("id = ? AND user_id = ? AND stream_id = ?", existingPin.ID, userId, _stream.ID).First(&existingPin).Error
+			if err != nil {
+				return nil, fmt.Errorf("failed to reload restored stream pin: %w", err)
+			}
 		} else {
 			s.logger.Debug("Stream pin already exists, returning existing pin",
 				zap.Uint("userID", userId),
@@ -909,6 +915,15 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 			return gorm.ErrRecordNotFound
 		}
 		return fmt.Errorf("failed to check stream ownership: %w", err)
+	}
+
+	// If the pin is already soft-deleted, return success (idempotent)
+	if streamPin.DeletedAt.Valid {
+		s.logger.Debug("Stream pin already deleted",
+			zap.Uint("userID", userID),
+			zap.Uint("streamID", _stream.ID),
+			zap.String("sdHash", sdHash))
+		return nil
 	}
 
 	// Delete only the stream pin record (soft delete)
