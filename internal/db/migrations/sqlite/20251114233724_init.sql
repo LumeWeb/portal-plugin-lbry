@@ -32,8 +32,8 @@ CREATE TABLE IF NOT EXISTS lbry_stream_blobs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP DEFAULT NULL,
-    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id) ON DELETE CASCADE,
-    FOREIGN KEY (blob_id) REFERENCES lbry_blobs(id) ON DELETE CASCADE,
+    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id),
+    FOREIGN KEY (blob_id) REFERENCES lbry_blobs(id),
     UNIQUE(stream_id, blob_id)
 );
 
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS lbry_stream_pins (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP DEFAULT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id),
     UNIQUE(user_id, stream_id)
 );
 
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS lbry_devices (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP DEFAULT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lbry_devices_user_id ON lbry_devices(user_id);
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
     UNIQUE(user_id, stream_id, blob_number),
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (device_id) REFERENCES lbry_devices(id),
-    FOREIGN KEY (stream_id) REFERENCES lbry_pending_streams(id) ON DELETE CASCADE
+    FOREIGN KEY (stream_id) REFERENCES lbry_pending_streams(id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lbry_pending_blobs_user_id ON lbry_pending_blobs(user_id);
