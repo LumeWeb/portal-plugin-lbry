@@ -1,5 +1,4 @@
 -- +goose Up
--- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS lbry_streams (
     id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     stream_hash CHAR(96) NOT NULL UNIQUE,
@@ -32,8 +31,8 @@ CREATE TABLE IF NOT EXISTS lbry_stream_blobs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
-    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id) ON DELETE CASCADE,
-    FOREIGN KEY (blob_id) REFERENCES lbry_blobs(id) ON DELETE CASCADE,
+    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id),
+    FOREIGN KEY (blob_id) REFERENCES lbry_blobs(id),
     UNIQUE KEY unique_stream_blob (stream_id, blob_id)
 );
 
@@ -44,8 +43,8 @@ CREATE TABLE IF NOT EXISTS lbry_stream_pins (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (stream_id) REFERENCES lbry_streams(id),
     UNIQUE KEY unique_user_stream_pin (user_id, stream_id)
 );
 
@@ -58,7 +57,7 @@ CREATE TABLE IF NOT EXISTS lbry_devices (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS lbry_pending_streams (
@@ -109,12 +108,10 @@ CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
     
     FOREIGN KEY (user_id) REFERENCES users(id),
     FOREIGN KEY (device_id) REFERENCES lbry_devices(id),
-    FOREIGN KEY (stream_id) REFERENCES lbry_pending_streams(id) ON DELETE CASCADE
+    FOREIGN KEY (stream_id) REFERENCES lbry_pending_streams(id)
 );
--- +goose StatementEnd
 
 -- +goose Down
--- +goose StatementBegin
 DROP TABLE IF EXISTS lbry_pending_blobs;
 DROP TABLE IF EXISTS lbry_pending_streams;
 DROP TABLE IF EXISTS lbry_stream_pins;
@@ -122,4 +119,3 @@ DROP TABLE IF EXISTS lbry_stream_blobs;
 DROP TABLE IF EXISTS lbry_blobs;
 DROP TABLE IF EXISTS lbry_streams;
 DROP TABLE IF EXISTS lbry_devices;
--- +goose StatementEnd
