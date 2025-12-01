@@ -125,7 +125,7 @@ go fmt ./...
 
 ### Project Structure
 
-```
+```text
 ├── lbry.go                 # Main plugin entry point
 ├── core/                   # Core service interfaces and mocks
 ├── internal/               # Internal implementation details
