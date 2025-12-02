@@ -199,8 +199,7 @@ func (rs *ReflectorStore) Has(ctx context.Context, hash string) (bool, error) {
 	// Check existence without reading full data
 	exists, err := rs.storageSvc.S3TemporaryUploadExists(ctx, rs.proto, getReflectorBlobPath(userID, hash))
 	if err != nil {
-		// If there's an error checking existence, assume it doesn't exist
-		return false, nil
+		return false, fmt.Errorf("failed to check blob existence: %w", err)
 	}
 
 	return exists, nil
