@@ -653,8 +653,9 @@ func TestReflectorStore_Has_NoUserID(t *testing.T) {
 				exists, err := store.Has(tc.ctx, testHash)
 
 				// Assert
-				assert.NoError(t, err)
-				assert.False(t, exists) // Should return false when user ID cannot be extracted
+				assert.Error(t, err)
+				assert.False(t, exists)
+				assert.Contains(t, err.Error(), "user ID not found in context for ReflectorStore Has operation")
 			})
 		}
 	})
@@ -699,8 +700,9 @@ func TestReflectorStore_Has_StorageError(t *testing.T) {
 		exists, err := store.Has(ctxWithIP, testHash)
 
 		// Assert
-		assert.NoError(t, err)  // Should not return error, just false
-		assert.False(t, exists) // Should return false when storage service errors
+		assert.Error(t, err)                                              // Should now propagate the storage error
+		assert.False(t, exists)                                           // Should return false when storage service errors
+		assert.Contains(t, err.Error(), "failed to check blob existence") // Verify wrapped error message
 	})
 }
 
@@ -729,8 +731,9 @@ func TestReflectorStore_Has_DeviceLookupError(t *testing.T) {
 		exists, err := store.Has(ctxWithIP, testHash)
 
 		// Assert
-		assert.NoError(t, err)  // Should not return error, just false
+		assert.Error(t, err)    // Should now return error when device lookup fails
 		assert.False(t, exists) // Should return false when device lookup fails
+		assert.Contains(t, err.Error(), "user ID not found in context for ReflectorStore Has operation")
 	})
 }
 

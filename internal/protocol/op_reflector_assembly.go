@@ -248,6 +248,15 @@ func (h *ReflectorAssemblyOperationHandler) assembleStream(ctx context.Context, 
 
 		blobHash := hex.EncodeToString(blobInfo.BlobHash)
 
+		// Check if blob exists in temporary storage before attempting to retrieve it
+		exists, err := reflectorStore.Has(ctx, blobHash)
+		if err != nil {
+			return fmt.Errorf("failed to check blob existence for %s: %w", blobHash, err)
+		}
+		if !exists {
+			return fmt.Errorf("blob %s not found in temporary storage", blobHash)
+		}
+
 		data, err := reflectorStore.Get(ctx, blobHash)
 		if err != nil {
 			return fmt.Errorf("failed to get blob %s from reflector store: %w", blobHash, err)
