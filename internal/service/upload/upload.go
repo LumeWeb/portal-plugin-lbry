@@ -272,12 +272,9 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 						zap.Int("blob_number", pendingBlob.BlobNumber),
 						zap.Uint("stream_id", pendingBlob.StreamID))
 
-					// For the update, we need to be careful about blob_number to avoid unique constraint violations
-					// If we're updating an existing record, don't try to change blob_number unless it's 0
-					updateOnlyFields := updates
-					if pendingBlob.BlobNumber > 0 {
-						updateOnlyFields = lo.OmitByKeys(updates, []string{"blob_number"})
-					}
+					// For the update, always omit blob_number to avoid unique constraint violations
+					// The blob_number should only be set during initial creation, never updated afterward
+					updateOnlyFields := lo.OmitByKeys(updates, []string{"blob_number"})
 
 					return updateExisting(pendingBlob.BlobHash, pendingBlob.BlobNumber, pendingBlob.StreamID, updateOnlyFields)
 				}
@@ -437,7 +434,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			}
 
 			if err := createWithFallback(pendingBlob, updates); err != nil {
-				tx.AddError(fmt.Errorf("failed to create pending blob: %w", err))
+				_ = tx.AddError(fmt.Errorf("failed to create pending blob: %w", err))
 				return tx
 			}
 
