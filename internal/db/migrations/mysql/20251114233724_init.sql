@@ -52,11 +52,12 @@ CREATE TABLE IF NOT EXISTS lbry_devices (
     id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     user_id BIGINT UNSIGNED NOT NULL,
     name VARCHAR(255) NOT NULL,
-    ip_address VARCHAR(45) NOT NULL UNIQUE,
+    ip_address VARCHAR(45) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id)
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE KEY unique_ip_address_active (ip_address, deleted_at)
 );
 
 CREATE TABLE IF NOT EXISTS lbry_pending_streams (

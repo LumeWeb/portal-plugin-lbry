@@ -53,12 +53,14 @@ CREATE TABLE IF NOT EXISTS lbry_devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     name TEXT NOT NULL,
-    ip_address TEXT NOT NULL UNIQUE,
+    ip_address TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP DEFAULT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lbry_devices_ip_address_active ON lbry_devices(ip_address) WHERE deleted_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_lbry_devices_user_id ON lbry_devices(user_id);
 
@@ -123,4 +125,5 @@ DROP TABLE IF EXISTS lbry_stream_blobs;
 DROP TABLE IF EXISTS lbry_blobs;
 DROP TABLE IF EXISTS lbry_streams;
 DROP TABLE IF EXISTS lbry_devices;
+DROP INDEX IF EXISTS idx_lbry_devices_ip_address_active;
 -- +goose StatementEnd
