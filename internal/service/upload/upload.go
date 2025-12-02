@@ -303,8 +303,27 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				return tx
 			}
 
-			// If no terminating blobs were updated, create a new one
+			// If no terminating blobs were updated, check if there are any terminating blobs at all
 			if result.RowsAffected == 0 {
+				var existingTerminatingBlobs []pluginDb.PendingBlob
+				err := tx.Where("user_id = ? AND blob_hash = ? AND terminating = ?", userID, blobHash, true).
+					Find(&existingTerminatingBlobs).Error
+
+				if err != nil {
+					_ = tx.AddError(fmt.Errorf("failed to check existing terminating blobs: %w", err))
+					return tx
+				}
+
+				// If there are existing terminating blobs, they're already marked as received, so we're done
+				if len(existingTerminatingBlobs) > 0 {
+					s.logger.Debug("Terminating blobs already exist and are marked as received",
+						zap.Uint("user_id", userID),
+						zap.String("terminating_hash", blobHash),
+						zap.Int("existing_count", len(existingTerminatingBlobs)))
+					return nil
+				}
+
+				// No terminating blobs exist at all, create a new one with stream_id=0 to avoid conflicts
 				pendingBlob := pluginDb.PendingBlob{
 					BlobHash:    blobHash,
 					UserID:      userID,
