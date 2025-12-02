@@ -728,9 +728,9 @@ func isDuplicateKeyError(err error) bool {
 	}
 
 	// Check error message patterns for common duplicate key errors
-	errMsg := err.Error()
+	errMsg := strings.ToLower(err.Error())
 	return strings.Contains(errMsg, "duplicate") ||
-		strings.Contains(errMsg, "UNIQUE constraint failed") ||
+		strings.Contains(errMsg, "unique constraint failed") ||
 		strings.Contains(errMsg, "unique constraint")
 }
 
