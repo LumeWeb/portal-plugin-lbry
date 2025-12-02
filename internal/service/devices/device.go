@@ -65,7 +65,7 @@ func (s *DeviceServiceDefault) CreateDevice(ctx context.Context, userID uint, na
 		return nil, err
 	}
 
-	// Check if device with this IP already exists (globally across all users)
+	// Check if device with this IP already exists
 	var existingDevice db.Device
 	err := s.db.WithContext(ctx).Where("ip_address = ?", ipAddress).First(&existingDevice).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -111,7 +111,7 @@ func (s *DeviceServiceDefault) UpdateDevice(ctx context.Context, userID, id uint
 		return nil, fmt.Errorf("failed to find device: %w", err)
 	}
 
-	// Check if another device with this IP already exists (globally across all users)
+	// Check if another device with this IP already exists
 	var existingDevice db.Device
 	err = s.db.WithContext(ctx).Where("ip_address = ? AND id != ?", ipAddress, id).First(&existingDevice).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {

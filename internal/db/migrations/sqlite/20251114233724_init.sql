@@ -60,8 +60,6 @@ CREATE TABLE IF NOT EXISTS lbry_devices (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_lbry_devices_ip_address_active ON lbry_devices(ip_address) WHERE deleted_at IS NULL;
-
 CREATE INDEX IF NOT EXISTS idx_lbry_devices_user_id ON lbry_devices(user_id);
 
 CREATE TABLE IF NOT EXISTS lbry_pending_blobs (
@@ -125,5 +123,4 @@ DROP TABLE IF EXISTS lbry_stream_blobs;
 DROP TABLE IF EXISTS lbry_blobs;
 DROP TABLE IF EXISTS lbry_streams;
 DROP TABLE IF EXISTS lbry_devices;
-DROP INDEX IF EXISTS idx_lbry_devices_ip_address_active;
 -- +goose StatementEnd
