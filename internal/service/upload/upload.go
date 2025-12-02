@@ -14,9 +14,10 @@ import (
 	"go.lumeweb.com/liblbry/stream"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
-	"go.lumeweb.com/portal-plugin-lbry/internal/db"
+	pluginDb "go.lumeweb.com/portal-plugin-lbry/internal/db"
 	"go.lumeweb.com/portal-plugin-lbry/internal/protocol/util"
 	"go.lumeweb.com/portal/core"
+	"go.lumeweb.com/portal/db"
 	"go.lumeweb.com/portal/db/models"
 	"go.lumeweb.com/queryutil"
 	"go.uber.org/zap"
@@ -189,7 +190,7 @@ func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, dev
 		return fmt.Errorf("failed to generate terminating blob hash: %w", hashErr)
 	}
 
-	pendingBlob := db.PendingBlob{
+	pendingBlob := pluginDb.PendingBlob{
 		BlobHash:    blobHash,
 		UserID:      userID,
 		DeviceID:    deviceID,
@@ -230,20 +231,20 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		return fmt.Errorf("failed to generate terminating blob hash: %w", hashErr)
 	}
 
-	// Wrap the entire operation in a database transaction to ensure atomicity
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// Wrap the entire operation in a database transaction with retry logic to handle lock errors
+	return db.RetryableTransaction(s.ctx, s.db, func(tx *gorm.DB) *gorm.DB {
 		// Helper function to update existing records using the unique key (user_id, stream_id, blob_number)
 		// For StreamID=0, we use a different WHERE clause to handle blobs without stream association
 		updateExisting := func(hash string, blobNumber int, streamID uint, updates map[string]any) error {
 			var result *gorm.DB
 			if streamID == 0 {
 				// For blobs without stream association, match on user_id, blob_hash, and blob_number only
-				result = tx.Model(&db.PendingBlob{}).
+				result = tx.Model(&pluginDb.PendingBlob{}).
 					Where("user_id = ? AND blob_hash = ? AND blob_number = ? AND stream_id = 0", userID, hash, blobNumber).
 					Updates(updates)
 			} else {
 				// For blobs with stream association, use the full unique key
-				result = tx.Model(&db.PendingBlob{}).
+				result = tx.Model(&pluginDb.PendingBlob{}).
 					Where("user_id = ? AND stream_id = ? AND blob_number = ? AND blob_hash = ?", userID, streamID, blobNumber, hash).
 					Updates(updates)
 			}
@@ -258,12 +259,27 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		}
 
 		// Helper function to create new record with fallback to update
-		createWithFallback := func(pendingBlob db.PendingBlob, updates map[string]any) error {
+		// This handles race conditions where multiple requests try to create the same record
+		createWithFallback := func(pendingBlob pluginDb.PendingBlob, updates map[string]any) error {
 			err := tx.Create(&pendingBlob).Error
 			if err != nil {
 				// Check if this is a duplicate key/conflict error
 				if isDuplicateKeyError(err) {
-					return updateExisting(pendingBlob.BlobHash, pendingBlob.BlobNumber, pendingBlob.StreamID, updates)
+					// Race condition: another request created the record first
+					// Try to update the existing record instead
+					s.logger.Debug("Race condition detected, updating existing pending blob",
+						zap.String("blob_hash", pendingBlob.BlobHash),
+						zap.Int("blob_number", pendingBlob.BlobNumber),
+						zap.Uint("stream_id", pendingBlob.StreamID))
+
+					// For the update, we need to be careful about blob_number to avoid unique constraint violations
+					// If we're updating an existing record, don't try to change blob_number unless it's 0
+					updateOnlyFields := updates
+					if pendingBlob.BlobNumber > 0 {
+						updateOnlyFields = lo.OmitByKeys(updates, []string{"blob_number"})
+					}
+
+					return updateExisting(pendingBlob.BlobHash, pendingBlob.BlobNumber, pendingBlob.StreamID, updateOnlyFields)
 				}
 				// For all other errors, return the original error immediately
 				return err
@@ -275,7 +291,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		// since they all have the same hash and serve the same purpose
 		if isTerminating {
 			// Update all terminating blobs for this user to mark them as received
-			result := tx.Model(&db.PendingBlob{}).
+			result := tx.Model(&pluginDb.PendingBlob{}).
 				Where("user_id = ? AND blob_hash = ? AND received = ?", userID, blobHash, false).
 				Updates(map[string]any{
 					"received":  true,
@@ -283,12 +299,13 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				})
 
 			if result.Error != nil {
-				return fmt.Errorf("failed to update terminating blobs: %w", result.Error)
+				_ = tx.AddError(fmt.Errorf("failed to update terminating blobs: %w", result.Error))
+				return tx
 			}
 
 			// If no terminating blobs were updated, create a new one
 			if result.RowsAffected == 0 {
-				pendingBlob := db.PendingBlob{
+				pendingBlob := pluginDb.PendingBlob{
 					BlobHash:    blobHash,
 					UserID:      userID,
 					DeviceID:    deviceID,
@@ -306,7 +323,8 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				}
 
 				if err := createWithFallback(pendingBlob, updates); err != nil {
-					return fmt.Errorf("failed to create terminating blob: %w", err)
+					_ = tx.AddError(fmt.Errorf("failed to create terminating blob: %w", err))
+					return tx
 				}
 
 				s.logger.Debug("Created new terminating blob as received",
@@ -323,12 +341,13 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 
 		// For regular blobs, find existing records first and update them using their unique key
 		// Find all pending blobs with this hash for this user (both received and not received)
-		var existingBlobs []db.PendingBlob
+		var existingBlobs []pluginDb.PendingBlob
 		err := tx.Where("user_id = ? AND blob_hash = ?", userID, blobHash).
 			Find(&existingBlobs).Error
 
 		if err != nil {
-			return fmt.Errorf("failed to find existing pending blobs: %w", err)
+			_ = tx.AddError(fmt.Errorf("failed to find existing pending blobs: %w", err))
+			return tx
 		}
 
 		updates := map[string]any{
@@ -349,8 +368,8 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 
 		if len(existingBlobs) > 0 {
 			// Split existing blobs into those with received=false and received=true
-			var notReceivedBlobs []db.PendingBlob
-			var alreadyReceivedBlobs []db.PendingBlob
+			var notReceivedBlobs []pluginDb.PendingBlob
+			var alreadyReceivedBlobs []pluginDb.PendingBlob
 
 			for _, existingBlob := range existingBlobs {
 				if !existingBlob.Received {
@@ -363,7 +382,8 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			// Update blobs with received=false using full updates map
 			for _, existingBlob := range notReceivedBlobs {
 				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updates); err != nil {
-					return err
+					_ = tx.AddError(err)
+					return tx
 				}
 			}
 
@@ -371,7 +391,8 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			updateOnlyFields := lo.OmitByKeys(updates, []string{"blob_number"})
 			for _, existingBlob := range alreadyReceivedBlobs {
 				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updateOnlyFields); err != nil {
-					return err
+					_ = tx.AddError(err)
+					return tx
 				}
 			}
 
@@ -384,7 +405,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				zap.Int("total_updated", totalUpdated))
 		} else {
 			// No existing records found, create a new one
-			pendingBlob := db.PendingBlob{
+			pendingBlob := pluginDb.PendingBlob{
 				BlobHash:    blobHash,
 				UserID:      userID,
 				DeviceID:    deviceID,
@@ -397,7 +418,8 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			}
 
 			if err := createWithFallback(pendingBlob, updates); err != nil {
-				return fmt.Errorf("failed to create pending blob: %w", err)
+				tx.AddError(fmt.Errorf("failed to create pending blob: %w", err))
+				return tx
 			}
 
 			s.logger.Debug("Created new pending blob as received",
@@ -405,7 +427,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				zap.String("blob_hash", blobHash))
 		}
 
-		return nil
+		return tx
 	})
 }
 
@@ -422,7 +444,7 @@ func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, d
 	// Convert stream hash bytes to string
 	streamHash := hex.EncodeToString(sdBlob.StreamHash)
 
-	pendingStream := db.PendingStream{
+	pendingStream := pluginDb.PendingStream{
 		StreamHash:        streamHash,
 		SDHash:            sdHash,
 		StreamName:        sdBlob.StreamName,
@@ -564,7 +586,7 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 			}
 
 			// Create pending blob record with Received=false to indicate it's waiting for upload
-			pendingBlob := db.PendingBlob{
+			pendingBlob := pluginDb.PendingBlob{
 				BlobHash:    blobHash,
 				UserID:      userID,
 				DeviceID:    deviceID,
@@ -609,7 +631,7 @@ func (s *UploadServiceDefault) GetMissingBlobs(ctx context.Context, userID uint,
 	var availableBlobs []string
 
 	// Check regular pending blobs for this specific stream only
-	err := s.db.WithContext(ctx).Model(&db.PendingBlob{}).
+	err := s.db.WithContext(ctx).Model(&pluginDb.PendingBlob{}).
 		Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, streamID, filteredRequiredBlobs).
 		Pluck("blob_hash", &availableBlobs).Error
 
@@ -634,7 +656,7 @@ func (s *UploadServiceDefault) GetMissingBlobs(ctx context.Context, userID uint,
 func (s *UploadServiceDefault) GetPendingBlobCount(ctx context.Context, userID uint, streamID uint) (int64, error) {
 	var count int64
 	err := s.db.WithContext(ctx).
-		Model(&db.PendingBlob{}).
+		Model(&pluginDb.PendingBlob{}).
 		Where("user_id = ? AND stream_id = ?", userID, streamID).
 		Count(&count).Error
 
@@ -648,7 +670,7 @@ func (s *UploadServiceDefault) GetPendingBlobCount(ctx context.Context, userID u
 // CleanupPendingBlobs removes pending blob records after successful assembly
 func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID uint, streamResult *stream.StreamResult) error {
 	// First, find the pending stream by SD hash and user ID to get the stream ID
-	var pendingStream db.PendingStream
+	var pendingStream pluginDb.PendingStream
 	findErr := s.db.WithContext(ctx).
 		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
 		First(&pendingStream).Error
@@ -675,7 +697,7 @@ func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID u
 
 			err := s.db.WithContext(ctx).
 				Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, pendingStream.ID, contentBlobHashes).
-				Delete(&db.PendingBlob{}).Error
+				Delete(&pluginDb.PendingBlob{}).Error
 			if err != nil {
 				return fmt.Errorf("failed to cleanup pending blobs: %w", err)
 			}
@@ -686,7 +708,7 @@ func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID u
 	// This will succeed even if no record exists (no-op)
 	err := s.db.WithContext(ctx).
 		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
-		Delete(&db.PendingStream{}).Error
+		Delete(&pluginDb.PendingStream{}).Error
 	if err != nil {
 		return fmt.Errorf("failed to cleanup pending stream: %w", err)
 	}
@@ -714,8 +736,8 @@ func isDuplicateKeyError(err error) bool {
 
 // ensureActivePin finds an existing pin (including soft-deleted) and ensures it's active
 // Returns the pin if found/restored, or gorm.ErrRecordNotFound if not found
-func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, streamID uint, sdHash string) (*db.StreamPin, error) {
-	var pin db.StreamPin
+func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, streamID uint, sdHash string) (*pluginDb.StreamPin, error) {
+	var pin pluginDb.StreamPin
 	err := s.db.WithContext(ctx).
 		Unscoped().
 		Where("user_id = ? AND stream_id = ?", userId, streamID).
@@ -756,7 +778,7 @@ func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, stre
 }
 
 // CreateStreamPin creates an LBRY stream pin record
-func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint, sdCid cid.Cid) (*db.StreamPin, error) {
+func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint, sdCid cid.Cid) (*pluginDb.StreamPin, error) {
 	// Convert CID to stream hash string
 	sdHash := sdCid.String()
 	lbryHash, err := stream.FromMultihash(sdHash)
@@ -765,8 +787,8 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 	}
 
 	// Find the stream
-	var _stream db.Stream
-	if err = s.db.WithContext(ctx).First(&_stream, db.Stream{SDHash: lbryHash}).Error; err != nil {
+	var _stream pluginDb.Stream
+	if err = s.db.WithContext(ctx).First(&_stream, pluginDb.Stream{SDHash: lbryHash}).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("stream not found: %s", sdHash)
 		}
@@ -783,7 +805,7 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 	}
 
 	// Create a new StreamPin record
-	streamPin := &db.StreamPin{
+	streamPin := &pluginDb.StreamPin{
 		UserID:   uint64(userId),
 		StreamID: uint64(_stream.ID),
 	}
@@ -816,15 +838,15 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 }
 
 // ListStreams returns a paginated list of streams for a user
-func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Stream, int64, error) {
-	var streams []*db.Stream
+func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*pluginDb.Stream, int64, error) {
+	var streams []*pluginDb.Stream
 	var total int64
 
 	// Build the base query with user filter using GORM OOP
 	// Join with StreamPin to filter streams that belong to the user
 	// Explicitly exclude soft-deleted stream pins
 	query := s.db.WithContext(ctx).
-		Model(&db.Stream{}).
+		Model(&pluginDb.Stream{}).
 		Joins("INNER JOIN lbry_stream_pins ON lbry_streams.id = lbry_stream_pins.stream_id").
 		Where("lbry_stream_pins.user_id = ? AND lbry_stream_pins.deleted_at IS NULL", userID)
 
@@ -852,8 +874,8 @@ func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, fil
 }
 
 // GetPendingStream retrieves pending stream metadata by user ID and SD hash
-func (s *UploadServiceDefault) GetPendingStream(ctx context.Context, userID uint, sdHash string) (*db.PendingStream, error) {
-	var pendingStream db.PendingStream
+func (s *UploadServiceDefault) GetPendingStream(ctx context.Context, userID uint, sdHash string) (*pluginDb.PendingStream, error) {
+	var pendingStream pluginDb.PendingStream
 	err := s.db.WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -865,16 +887,16 @@ func (s *UploadServiceDefault) GetPendingStream(ctx context.Context, userID uint
 }
 
 // GetPendingBlobs retrieves pending blobs for a given SD hash
-func (s *UploadServiceDefault) GetPendingBlobs(ctx context.Context, userID uint, sdHash string) ([]*db.PendingBlob, error) {
+func (s *UploadServiceDefault) GetPendingBlobs(ctx context.Context, userID uint, sdHash string) ([]*pluginDb.PendingBlob, error) {
 	// First get the pending stream to find its ID
-	var pendingStream db.PendingStream
+	var pendingStream pluginDb.PendingStream
 	err := s.db.WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending stream for user %d and SD hash %s: %w", userID, sdHash, err)
 	}
 
 	// Now get pending blobs for this specific stream
-	var pendingBlobs []*db.PendingBlob
+	var pendingBlobs []*pluginDb.PendingBlob
 	err = s.db.WithContext(ctx).Where("user_id = ? AND stream_id = ?", userID, pendingStream.ID).Order("blob_number").Find(&pendingBlobs).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending blobs for user %d and SD hash %s: %w", userID, sdHash, err)
@@ -889,7 +911,7 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 	}
 
 	// Find the stream by SD hash
-	var _stream db.Stream
+	var _stream pluginDb.Stream
 	err := s.db.WithContext(ctx).Where("sd_hash = ?", sdHash).First(&_stream).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -899,11 +921,11 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 	}
 
 	// Check if the stream pin exists and belongs to the user (including soft-deleted)
-	streamPinQuery := db.StreamPin{
+	streamPinQuery := pluginDb.StreamPin{
 		UserID:   uint64(userID),
 		StreamID: uint64(_stream.ID),
 	}
-	var streamPin db.StreamPin
+	var streamPin pluginDb.StreamPin
 	err = s.db.WithContext(ctx).
 		Unscoped(). // Include soft-deleted records to check for restoration
 		Where(&streamPinQuery).
@@ -933,7 +955,7 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 	// Delete only the stream pin record (soft delete)
 	if err := s.db.WithContext(ctx).
 		Where(&streamPinQuery).
-		Delete(&db.StreamPin{}).Error; err != nil {
+		Delete(&pluginDb.StreamPin{}).Error; err != nil {
 		return fmt.Errorf("failed to delete stream pin: %w", err)
 	}
 
