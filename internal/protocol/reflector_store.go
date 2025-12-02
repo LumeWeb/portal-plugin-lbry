@@ -193,7 +193,7 @@ func (rs *ReflectorStore) closeReaderSafely(reader io.Reader) {
 func (rs *ReflectorStore) Has(ctx context.Context, hash string) (bool, error) {
 	userID := rs.extractUserIDFromContext(ctx)
 	if userID == 0 {
-		return false, nil
+		return false, fmt.Errorf("user ID not found in context for ReflectorStore Has operation")
 	}
 
 	// Check existence without reading full data
