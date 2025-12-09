@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"go.lumeweb.com/httputil"
@@ -99,7 +100,7 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 	metadata := &dto.StreamMetadataRequest{}
 
 	// Parse the JSON from the "meta" form field into the metadata struct if provided
-	if meta != "" {
+	if strings.TrimSpace(meta) != "" {
 		err = json.Unmarshal([]byte(meta), metadata)
 		if err != nil {
 			// If parsing fails, return a bad request error
