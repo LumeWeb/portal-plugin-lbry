@@ -26,25 +26,19 @@ func (p *PostStreamUploadResponse) FromModel(_ *PostStreamUploadResponse) error 
 // StreamMetadataRequest represents the metadata for LBRY stream uploads
 type StreamMetadataRequest struct {
 	// StreamName is the name of the stream in the LBRY network
-	StreamName string `json:"stream_name"`
+	StreamName string `json:"stream_name,omitempty"`
 
 	// SuggestedFileName is the recommended filename when downloading the stream
-	SuggestedFileName string `json:"suggested_file_name"`
-
-	// Filename is the actual filename of the stream
-	Filename string `json:"filename,omitempty"`
+	SuggestedFileName string `json:"suggested_file_name,omitempty"`
 }
 
 // Schema returns a Zog schema for validating StreamMetadataRequest
 func (s *StreamMetadataRequest) Schema() *z.StructSchema {
 	return z.Struct(z.Shape{
 		"StreamName": z.String().
-			Required().
+			Optional().
 			Max(255),
 		"SuggestedFileName": z.String().
-			Required().
-			Max(255),
-		"Filename": z.String().
 			Optional().
 			Max(255),
 	})
