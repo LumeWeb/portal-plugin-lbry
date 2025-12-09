@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"go.lumeweb.com/httputil"
@@ -92,23 +93,20 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 		return nil
 	}
 
-	// Parse form data to extract metadata
+	// Parse form data to extract metadata (optional)
 	meta := c.Request().FormValue("meta")
-	if meta == "" {
-		// If no metadata provided, return a bad request error
-		_ = ctx.Error(NewError(ErrKeyMetadataMissing, nil), http.StatusBadRequest)
-		return nil
-	}
 
 	// Create a StreamMetadataRequest instance
 	metadata := &dto.StreamMetadataRequest{}
 
-	// Parse the JSON from the "meta" form field into the metadata struct
-	err = json.Unmarshal([]byte(meta), metadata)
-	if err != nil {
-		// If parsing fails, return a bad request error
-		_ = ctx.Error(NewError(ErrKeyMetadataJSONInvalid, err), http.StatusBadRequest)
-		return nil
+	// Parse the JSON from the "meta" form field into the metadata struct if provided
+	if strings.TrimSpace(meta) != "" {
+		err = json.Unmarshal([]byte(meta), metadata)
+		if err != nil {
+			// If parsing fails, return a bad request error
+			_ = ctx.Error(NewError(ErrKeyMetadataJSONInvalid, err), http.StatusBadRequest)
+			return nil
+		}
 	}
 
 	// Validate the metadata using ctx.Validate
