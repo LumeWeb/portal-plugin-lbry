@@ -259,12 +259,12 @@ func createTestUserAndLogin(ctx coreTesting.TestContext) (string, uint) {
 	userSvc := core.GetService[core.UserService](ctx, core.USER_SERVICE)
 	authSvc := core.GetService[core.AuthService](ctx, core.AUTH_SERVICE)
 
-	user, err := userSvc.CreateAccount(TestUserEmail, TestUserPassword, false)
+	user, err := userSvc.CreateAccount(ctx, TestUserEmail, TestUserPassword, false)
 	if err != nil {
 		ctx.T().Fatalf("failed to create test user: %v", err)
 	}
 
-	token, _, err := authSvc.LoginPassword(TestUserEmail, TestUserPassword, TestSourceIP, false)
+	token, _, err := authSvc.LoginPassword(ctx, TestUserEmail, TestUserPassword, TestSourceIP, false)
 	if err != nil {
 		ctx.T().Fatalf("failed to login test user: %v", err)
 	}

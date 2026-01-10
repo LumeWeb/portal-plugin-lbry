@@ -27,13 +27,11 @@ import (
 
 // UploadServiceDefault implements the UploadServiceDefault interface for LBRY protocol
 type UploadServiceDefault struct {
-	ctx        core.Context
-	db         *gorm.DB
+	*core.BaseComponent
 	storage    core.StorageService
 	coreUpload core.UploadService
 	corePin    core.PinService
 	protocol   core.Protocol
-	logger     *core.Logger
 }
 
 // NewUploadService creates a new LBRY upload service instance
@@ -42,13 +40,10 @@ func NewUploadService() (core.Service, []core.ContextBuilderOption, error) {
 
 	return service, core.ContextOptions(
 		core.ContextWithStartupFunc(func(ctx core.Context) error {
-			service.ctx = ctx
-			service.db = ctx.DB()
 			service.storage = core.GetService[core.StorageService](ctx, core.STORAGE_SERVICE)
 			service.coreUpload = core.GetService[core.UploadService](ctx, core.UPLOAD_SERVICE)
 			service.corePin = core.GetService[core.PinService](ctx, core.PIN_SERVICE)
 			service.protocol = core.GetProtocol(internal.ProtocolName)
-			service.logger = ctx.Logger()
 
 			if service.storage == nil {
 				return fmt.Errorf("storage service not initialized")
@@ -113,13 +108,13 @@ func (s *UploadServiceDefault) HandleUpload(ctx context.Context, reader io.ReadS
 	// Cast to storage protocol with type safety
 	storageProtocol, err := util.CastToStorageProtocol(s.protocol)
 	if err != nil {
-		s.logger.Error("Failed to cast protocol to storage protocol", zap.Error(err))
+		s.Logger().Error("Failed to cast protocol to storage protocol", zap.Error(err))
 		return cid.Undef, "", fmt.Errorf("failed to cast protocol to storage protocol: %w", err)
 	}
 
 	uploadId, err := s.storage.S3TemporaryUpload(ctx, reader, uint64(size), storageProtocol)
 	if err != nil {
-		s.logger.Error("Failed to store upload data", zap.Error(err))
+		s.Logger().Error("Failed to store upload data", zap.Error(err))
 		return cid.Undef, "", fmt.Errorf("failed to store upload data: %w", err)
 	}
 	return streamCid, uploadId, nil
@@ -134,7 +129,7 @@ func (s *UploadServiceDefault) ProcessUpload(ctx context.Context, streamResult *
 
 	for index, c := range streamResult.ContentHashes {
 		if c == "" {
-			s.logger.Debug("Skipping terminating/empty blob",
+			s.Logger().Debug("Skipping terminating/empty blob",
 				zap.String("sd_blob_hash", streamResult.SDBlobHash))
 			continue
 		}
@@ -155,7 +150,7 @@ func (s *UploadServiceDefault) ProcessUpload(ctx context.Context, streamResult *
 
 		err = s.coreUpload.SaveUpload(ctx, uploadMeta)
 		if err != nil {
-			s.logger.Error("Failed to save upload record", zap.Error(err), zap.String("cid", _cid.String()))
+			s.Logger().Error("Failed to save upload record", zap.Error(err), zap.String("cid", _cid.String()))
 			return fmt.Errorf("failed to save upload record for %s: %w", _cid.String(), err)
 		}
 
@@ -170,12 +165,12 @@ func (s *UploadServiceDefault) ProcessUpload(ctx context.Context, streamResult *
 			return fmt.Errorf("failed to create pin record for CID %s: %w", _cid.String(), err)
 		}
 
-		s.logger.Debug("Created upload and pin records",
+		s.Logger().Debug("Created upload and pin records",
 			zap.String("cid", _cid.String()),
 			zap.Uint("userID", userId))
 	}
 
-	s.logger.Debug("Successfully processed uploads",
+	s.Logger().Debug("Successfully processed uploads",
 		zap.Uint("userID", userId),
 		zap.Int("cidCount", len(streamResult.ContentHashes)),
 	)
@@ -207,13 +202,13 @@ func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, dev
 	updates := s.buildPendingBlobUpdates(deviceID, &streamID, blobInfo, &received, &isTerminating, true, true)
 	conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, &streamID)
 
-	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   conflictColumns,
-		DoUpdates: updates,
-	}).Create(&pendingBlob).Error
-
-	if err != nil {
-		s.logger.Error("Failed to create pending blob record",
+	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Clauses(clause.OnConflict{
+			Columns:   conflictColumns,
+			DoUpdates: updates,
+		}).Create(&pendingBlob)
+	}); err != nil {
+		s.Logger().Error("Failed to create pending blob record",
 			zap.Uint("user_id", userID),
 			zap.String("blob_hash", blobHash),
 			zap.Bool("terminating", isTerminating),
@@ -232,7 +227,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 	}
 
 	// Wrap the entire operation in a database transaction with retry logic to handle lock errors
-	return db.RetryableTransaction(s.ctx, s.db, func(tx *gorm.DB) *gorm.DB {
+	return db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
 		// Helper function to update existing records using the unique key (user_id, stream_id, blob_number)
 		// For StreamID=0, we use a different WHERE clause to handle blobs without stream association
 		updateExisting := func(hash string, blobNumber int, streamID uint, updates map[string]any) error {
@@ -267,7 +262,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				if isDuplicateKeyError(err) {
 					// Race condition: another request created the record first
 					// Try to update the existing record instead
-					s.logger.Debug("Race condition detected, updating existing pending blob",
+					s.Logger().Debug("Race condition detected, updating existing pending blob",
 						zap.String("blob_hash", pendingBlob.BlobHash),
 						zap.Int("blob_number", pendingBlob.BlobNumber),
 						zap.Uint("stream_id", pendingBlob.StreamID))
@@ -313,7 +308,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 
 				// If there are existing terminating blobs, they're already marked as received, so we're done
 				if len(existingTerminatingBlobs) > 0 {
-					s.logger.Debug("Terminating blobs already exist and are marked as received",
+					s.Logger().Debug("Terminating blobs already exist and are marked as received",
 						zap.Uint("user_id", userID),
 						zap.String("terminating_hash", blobHash),
 						zap.Int("existing_count", len(existingTerminatingBlobs)))
@@ -343,11 +338,11 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 					return tx
 				}
 
-				s.logger.Debug("Created new terminating blob as received",
+				s.Logger().Debug("Created new terminating blob as received",
 					zap.Uint("user_id", userID),
 					zap.String("terminating_hash", blobHash))
 			} else {
-				s.logger.Debug("Updated all terminating blobs as received",
+				s.Logger().Debug("Updated all terminating blobs as received",
 					zap.Uint("user_id", userID),
 					zap.String("terminating_hash", blobHash))
 			}
@@ -413,7 +408,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			}
 
 			totalUpdated := len(notReceivedBlobs) + len(alreadyReceivedBlobs)
-			s.logger.Debug("Updated existing pending blobs as received",
+			s.Logger().Debug("Updated existing pending blobs as received",
 				zap.Uint("user_id", userID),
 				zap.String("blob_hash", blobHash),
 				zap.Int("not_received_count", len(notReceivedBlobs)),
@@ -438,7 +433,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				return tx
 			}
 
-			s.logger.Debug("Created new pending blob as received",
+			s.Logger().Debug("Created new pending blob as received",
 				zap.Uint("user_id", userID),
 				zap.String("blob_hash", blobHash))
 		}
@@ -472,22 +467,24 @@ func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, d
 		DeviceID:          deviceID,
 	}
 
-	err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "user_id"}, {Name: "sd_hash"}},
-		DoUpdates: clause.Set{
-			{Column: clause.Column{Name: "stream_hash"}, Value: pendingStream.StreamHash},
-			{Column: clause.Column{Name: "stream_name"}, Value: pendingStream.StreamName},
-			{Column: clause.Column{Name: "stream_type"}, Value: pendingStream.StreamType},
-			{Column: clause.Column{Name: "suggested_file_name"}, Value: pendingStream.SuggestedFileName},
-			{Column: clause.Column{Name: "key_data"}, Value: pendingStream.KeyData},
-			{Column: clause.Column{Name: "total_blobs"}, Value: pendingStream.TotalBlobs},
-			{Column: clause.Column{Name: "device_id"}, Value: pendingStream.DeviceID},
-			{Column: clause.Column{Name: "user_id"}, Value: pendingStream.UserID},
-		},
-	}).Create(&pendingStream).Error
+	err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "user_id"}, {Name: "sd_hash"}},
+			DoUpdates: clause.Set{
+				{Column: clause.Column{Name: "stream_hash"}, Value: pendingStream.StreamHash},
+				{Column: clause.Column{Name: "stream_name"}, Value: pendingStream.StreamName},
+				{Column: clause.Column{Name: "stream_type"}, Value: pendingStream.StreamType},
+				{Column: clause.Column{Name: "suggested_file_name"}, Value: pendingStream.SuggestedFileName},
+				{Column: clause.Column{Name: "key_data"}, Value: pendingStream.KeyData},
+				{Column: clause.Column{Name: "total_blobs"}, Value: pendingStream.TotalBlobs},
+				{Column: clause.Column{Name: "device_id"}, Value: pendingStream.DeviceID},
+				{Column: clause.Column{Name: "user_id"}, Value: pendingStream.UserID},
+			},
+		}).Create(&pendingStream)
+	})
 
 	if err != nil {
-		s.logger.Error("Failed to create pending stream record",
+		s.Logger().Error("Failed to create pending stream record",
 			zap.Uint("user_id", userID),
 			zap.String("sd_hash", sdHash),
 			zap.Error(err))
@@ -498,19 +495,19 @@ func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, d
 	if len(sdBlob.BlobInfos) > 0 {
 		err = s.createPendingBlobsFromSDBlob(ctx, userID, deviceID, pendingStream.ID, sdBlob.BlobInfos)
 		if err != nil {
-			s.logger.Error("Failed to create pending blob records from SD blob",
+			s.Logger().Error("Failed to create pending blob records from SD blob",
 				zap.Uint("user_id", userID),
 				zap.String("sd_hash", sdHash),
 				zap.Error(err))
 			return 0, fmt.Errorf("failed to create pending blob records from SD blob: %w", err)
 		}
 
-		s.logger.Debug("SD blob and child pending blobs created successfully",
+		s.Logger().Debug("SD blob and child pending blobs created successfully",
 			zap.Uint("user_id", userID),
 			zap.String("sd_hash", sdHash),
 			zap.Int("child_blob_count", len(sdBlob.BlobInfos)))
 	} else {
-		s.logger.Debug("SD blob stored successfully (no child blobs)",
+		s.Logger().Debug("SD blob stored successfully (no child blobs)",
 			zap.Uint("user_id", userID),
 			zap.String("sd_hash", sdHash))
 	}
@@ -594,11 +591,12 @@ func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *
 
 // createPendingBlobsFromSDBlob creates pending blob records from SD blob child blob information
 func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfos []stream.BlobInfo) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
 		for _, blobInfo := range blobInfos {
 			blobHash, isTerminating, hashErr := s.getBlobHashFromInfo(&blobInfo)
 			if hashErr != nil {
-				return fmt.Errorf("failed to generate terminating blob hash: %w", hashErr)
+				_ = tx.AddError(fmt.Errorf("failed to generate terminating blob hash: %w", hashErr))
+				return tx
 			}
 
 			// Create pending blob record with Received=false to indicate it's waiting for upload
@@ -624,10 +622,11 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 			}).Create(&pendingBlob).Error
 
 			if err != nil {
-				return fmt.Errorf("failed to create pending blob record for %s (terminating: %v): %w", blobHash, isTerminating, err)
+				_ = tx.AddError(fmt.Errorf("failed to create pending blob record for %s (terminating: %v): %w", blobHash, isTerminating, err))
+				return tx
 			}
 		}
-		return nil
+		return tx
 	})
 }
 
@@ -647,7 +646,7 @@ func (s *UploadServiceDefault) GetMissingBlobs(ctx context.Context, userID uint,
 	var availableBlobs []string
 
 	// Check regular pending blobs for this specific stream only
-	err := s.db.WithContext(ctx).Model(&pluginDb.PendingBlob{}).
+	err := s.DB().WithContext(ctx).Model(&pluginDb.PendingBlob{}).
 		Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, streamID, filteredRequiredBlobs).
 		Pluck("blob_hash", &availableBlobs).Error
 
@@ -671,7 +670,7 @@ func (s *UploadServiceDefault) GetMissingBlobs(ctx context.Context, userID uint,
 // GetPendingBlobCount returns the count of pending blobs for a stream
 func (s *UploadServiceDefault) GetPendingBlobCount(ctx context.Context, userID uint, streamID uint) (int64, error) {
 	var count int64
-	err := s.db.WithContext(ctx).
+	err := s.DB().WithContext(ctx).
 		Model(&pluginDb.PendingBlob{}).
 		Where("user_id = ? AND stream_id = ?", userID, streamID).
 		Count(&count).Error
@@ -685,51 +684,43 @@ func (s *UploadServiceDefault) GetPendingBlobCount(ctx context.Context, userID u
 
 // CleanupPendingBlobs removes pending blob records after successful assembly
 func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID uint, streamResult *stream.StreamResult) error {
-	// First, find the pending stream by SD hash and user ID to get the stream ID
-	var pendingStream pluginDb.PendingStream
-	findErr := s.db.WithContext(ctx).
-		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
-		First(&pendingStream).Error
-	if findErr != nil {
-		// If the pending stream is not found, continue with cleanup (no error)
-		if errors.Is(findErr, gorm.ErrRecordNotFound) {
-			// Continue with cleanup of pending streams by SD hash
-		} else {
-			// Return error for other database issues
-			return fmt.Errorf("failed to find pending stream: %w", findErr)
-		}
-	}
-
-	// Clean up regular pending blobs associated with this specific stream
-	// Only do this if we found a pending stream
-	if findErr == nil {
-		// If ContentBlobs is empty, don't delete any pending blobs
-		if len(streamResult.ContentBlobs) > 0 {
-			// Convert ContentBlobs to hex strings for comparison
-			contentBlobHashes := make([]string, len(streamResult.ContentBlobs))
-			for i, contentBlob := range streamResult.ContentBlobs {
-				contentBlobHashes[i] = hex.EncodeToString(contentBlob)
-			}
-
-			err := s.db.WithContext(ctx).
-				Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, pendingStream.ID, contentBlobHashes).
-				Delete(&pluginDb.PendingBlob{}).Error
-			if err != nil {
-				return fmt.Errorf("failed to cleanup pending blobs: %w", err)
+	return db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		// First, find the pending stream by SD hash and user ID to get the stream ID
+		var pendingStream pluginDb.PendingStream
+		findErr := tx.Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
+			First(&pendingStream).Error
+		if findErr != nil {
+			// If the pending stream is not found, continue with cleanup (no error)
+			if errors.Is(findErr, gorm.ErrRecordNotFound) {
+				// Continue with cleanup of pending streams by SD hash
+			} else {
+				// Return error for other database issues
+				_ = tx.AddError(fmt.Errorf("failed to find pending stream: %w", findErr))
+				return tx
 			}
 		}
-	}
 
-	// Clean up pending stream (SD blob) by SD hash
-	// This will succeed even if no record exists (no-op)
-	err := s.db.WithContext(ctx).
-		Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
-		Delete(&pluginDb.PendingStream{}).Error
-	if err != nil {
-		return fmt.Errorf("failed to cleanup pending stream: %w", err)
-	}
+		// Clean up regular pending blobs associated with this specific stream
+		// Only do this if we found a pending stream
+		if findErr == nil {
+			// If ContentBlobs is empty, don't delete any pending blobs
+			if len(streamResult.ContentBlobs) > 0 {
+				// Convert ContentBlobs to hex strings for comparison
+				contentBlobHashes := make([]string, len(streamResult.ContentBlobs))
+				for i, contentBlob := range streamResult.ContentBlobs {
+					contentBlobHashes[i] = hex.EncodeToString(contentBlob)
+				}
 
-	return nil
+				return tx.Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, pendingStream.ID, contentBlobHashes).
+					Delete(&pluginDb.PendingBlob{})
+			}
+		}
+
+		// Clean up pending stream (SD blob) by SD hash
+		// This will succeed even if no record exists (no-op)
+		return tx.Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
+			Delete(&pluginDb.PendingStream{})
+	})
 }
 
 // Helper function to detect duplicate key/conflict errors
@@ -754,40 +745,41 @@ func isDuplicateKeyError(err error) bool {
 // Returns the pin if found/restored, or gorm.ErrRecordNotFound if not found
 func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, streamID uint, sdHash string) (*pluginDb.StreamPin, error) {
 	var pin pluginDb.StreamPin
-	err := s.db.WithContext(ctx).
-		Unscoped().
-		Where("user_id = ? AND stream_id = ?", userId, streamID).
-		First(&pin).Error
-
-	if err != nil {
-		return nil, err
-	}
-
-	// If pin is soft-deleted, restore it
-	if pin.DeletedAt.Valid {
-		err = s.db.WithContext(ctx).Unscoped().Model(&pin).Update("deleted_at", nil).Error
-		if err != nil {
-			return nil, fmt.Errorf("failed to restore soft-deleted stream pin: %w", err)
+	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		if err := tx.Unscoped().
+			Where("user_id = ? AND stream_id = ?", userId, streamID).
+			First(&pin).Error; err != nil {
+			_ = tx.AddError(err)
+			return tx
 		}
 
-		s.logger.Info("Restored soft-deleted stream pin",
-			zap.Uint("userID", userId),
-			zap.Uint("streamID", streamID),
-			zap.Uint64("pinID", uint64(pin.ID)),
-			zap.String("sdHash", sdHash),
-			zap.Time("deletedAt", pin.DeletedAt.Time))
+		// If pin is soft-deleted, restore it
+		if pin.DeletedAt.Valid {
+			if err := tx.Unscoped().Model(&pin).Update("deleted_at", nil).Error; err != nil {
+				_ = tx.AddError(fmt.Errorf("failed to restore soft-deleted stream pin: %w", err))
+				return tx
+			}
 
-		// Reload the pin to reflect the updated state
-		err = s.db.WithContext(ctx).First(&pin, pin.ID).Error
-		if err != nil {
-			return nil, fmt.Errorf("failed to reload restored stream pin: %w", err)
+			s.Logger().Info("Restored soft-deleted stream pin",
+				zap.Uint("userID", userId),
+				zap.Uint("streamID", streamID),
+				zap.Uint64("pinID", uint64(pin.ID)),
+				zap.String("sdHash", sdHash),
+				zap.Time("deletedAt", pin.DeletedAt.Time))
+
+			// Reload the pin to reflect the updated state
+			return tx.First(&pin, pin.ID)
 		}
-	} else {
-		s.logger.Debug("Stream pin already exists, returning existing pin",
+
+		s.Logger().Debug("Stream pin already exists, returning existing pin",
 			zap.Uint("userID", userId),
 			zap.Uint("streamID", streamID),
 			zap.Uint64("pinID", uint64(pin.ID)),
 			zap.String("sdHash", sdHash))
+
+		return tx
+	}); err != nil {
+		return nil, err
 	}
 
 	return &pin, nil
@@ -802,53 +794,67 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 		return nil, fmt.Errorf("failed to convert stream CID to LBRY hash: %w", err)
 	}
 
-	// Find the stream
-	var _stream pluginDb.Stream
-	if err = s.db.WithContext(ctx).First(&_stream, pluginDb.Stream{SDHash: lbryHash}).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, fmt.Errorf("stream not found: %s", sdHash)
-		}
-		return nil, fmt.Errorf("failed to find stream %s: %w", sdHash, err)
-	}
-
-	// Try to find and ensure an existing pin is active
-	existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
-	if err == nil {
-		return existingPin, nil
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("failed to check existing stream pin: %w", err)
-	}
-
-	// Create a new StreamPin record
-	streamPin := &pluginDb.StreamPin{
-		UserID:   uint64(userId),
-		StreamID: uint64(_stream.ID),
-	}
-
-	// Save the StreamPin to the database with duplicate handling
-	if err = s.db.WithContext(ctx).Create(streamPin).Error; err != nil {
-		// Handle race condition where another request created the pin concurrently
-		if isDuplicateKeyError(err) {
-			s.logger.Debug("Stream pin created by concurrent request, fetching existing pin",
-				zap.Uint("userID", userId),
-				zap.Uint("streamID", _stream.ID),
-				zap.String("sdHash", sdHash))
-
-			// Use the helper to find and ensure the pin is active
-			existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
-			if err != nil {
-				return nil, fmt.Errorf("failed to fetch existing stream pin after duplicate constraint: %w", err)
+	var streamPin *pluginDb.StreamPin
+	if err = db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		// Find the stream
+		var _stream pluginDb.Stream
+		if err := tx.First(&_stream, pluginDb.Stream{SDHash: lbryHash}).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				_ = tx.AddError(fmt.Errorf("stream not found: %s", sdHash))
+				return tx
 			}
-			return existingPin, nil
+			_ = tx.AddError(fmt.Errorf("failed to find stream %s: %w", sdHash, err))
+			return tx
 		}
-		return nil, fmt.Errorf("failed to create stream pin: %w", err)
-	}
 
-	s.logger.Debug("Created new stream pin",
-		zap.Uint("userID", userId),
-		zap.Uint("streamID", _stream.ID),
-		zap.String("sdHash", sdHash))
+		// Try to find and ensure an existing pin is active
+		existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
+		if err == nil {
+			streamPin = existingPin
+			return tx
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = tx.AddError(fmt.Errorf("failed to check existing stream pin: %w", err))
+			return tx
+		}
+
+		// Create a new StreamPin record
+		streamPin = &pluginDb.StreamPin{
+			UserID:   uint64(userId),
+			StreamID: uint64(_stream.ID),
+		}
+
+		// Save the StreamPin to the database
+		if err := tx.Create(streamPin).Error; err != nil {
+			// Handle race condition where another request created the pin concurrently
+			if isDuplicateKeyError(err) {
+				s.Logger().Debug("Stream pin created by concurrent request, fetching existing pin",
+					zap.Uint("userID", userId),
+					zap.Uint("streamID", _stream.ID),
+					zap.String("sdHash", sdHash))
+
+				// Use the helper to find and ensure the pin is active
+				existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
+				if err != nil {
+					_ = tx.AddError(fmt.Errorf("failed to fetch existing stream pin after duplicate constraint: %w", err))
+					return tx
+				}
+				streamPin = existingPin
+				return tx
+			}
+			_ = tx.AddError(fmt.Errorf("failed to create stream pin: %w", err))
+			return tx
+		}
+
+		s.Logger().Debug("Created new stream pin",
+			zap.Uint("userID", userId),
+			zap.Uint("streamID", _stream.ID),
+			zap.String("sdHash", sdHash))
+
+		return tx
+	}); err != nil {
+		return nil, err
+	}
 
 	return streamPin, nil
 }
@@ -861,7 +867,7 @@ func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, fil
 	// Build the base query with user filter using GORM OOP
 	// Join with StreamPin to filter streams that belong to the user
 	// Explicitly exclude soft-deleted stream pins
-	query := s.db.WithContext(ctx).
+	query := s.DB().WithContext(ctx).
 		Model(&pluginDb.Stream{}).
 		Joins("INNER JOIN lbry_stream_pins ON lbry_streams.id = lbry_stream_pins.stream_id").
 		Where("lbry_stream_pins.user_id = ? AND lbry_stream_pins.deleted_at IS NULL", userID)
@@ -892,7 +898,7 @@ func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, fil
 // GetPendingStream retrieves pending stream metadata by user ID and SD hash
 func (s *UploadServiceDefault) GetPendingStream(ctx context.Context, userID uint, sdHash string) (*pluginDb.PendingStream, error) {
 	var pendingStream pluginDb.PendingStream
-	err := s.db.WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
+	err := s.DB().WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, fmt.Errorf("pending stream not found for user %d and SD hash %s", userID, sdHash)
@@ -906,14 +912,14 @@ func (s *UploadServiceDefault) GetPendingStream(ctx context.Context, userID uint
 func (s *UploadServiceDefault) GetPendingBlobs(ctx context.Context, userID uint, sdHash string) ([]*pluginDb.PendingBlob, error) {
 	// First get the pending stream to find its ID
 	var pendingStream pluginDb.PendingStream
-	err := s.db.WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
+	err := s.DB().WithContext(ctx).Where("user_id = ? AND sd_hash = ?", userID, sdHash).First(&pendingStream).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending stream for user %d and SD hash %s: %w", userID, sdHash, err)
 	}
 
 	// Now get pending blobs for this specific stream
 	var pendingBlobs []*pluginDb.PendingBlob
-	err = s.db.WithContext(ctx).Where("user_id = ? AND stream_id = ?", userID, pendingStream.ID).Order("blob_number").Find(&pendingBlobs).Error
+	err = s.DB().WithContext(ctx).Where("user_id = ? AND stream_id = ?", userID, pendingStream.ID).Order("blob_number").Find(&pendingBlobs).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending blobs for user %d and SD hash %s: %w", userID, sdHash, err)
 	}
@@ -926,59 +932,70 @@ func (s *UploadServiceDefault) DeleteStream(ctx context.Context, userID uint, sd
 		return gorm.ErrRecordNotFound
 	}
 
-	// Find the stream by SD hash
-	var _stream pluginDb.Stream
-	err := s.db.WithContext(ctx).Where("sd_hash = ?", sdHash).First(&_stream).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return gorm.ErrRecordNotFound
+	var streamPinDeleted bool
+	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		// Find the stream by SD hash
+		var _stream pluginDb.Stream
+		if err := tx.Where("sd_hash = ?", sdHash).First(&_stream).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				_ = tx.AddError(gorm.ErrRecordNotFound)
+				return tx
+			}
+			_ = tx.AddError(fmt.Errorf("failed to find stream: %w", err))
+			return tx
 		}
-		return fmt.Errorf("failed to find stream: %w", err)
-	}
 
-	// Check if the stream pin exists and belongs to the user (including soft-deleted)
-	streamPinQuery := pluginDb.StreamPin{
-		UserID:   uint64(userID),
-		StreamID: uint64(_stream.ID),
-	}
-	var streamPin pluginDb.StreamPin
-	err = s.db.WithContext(ctx).
-		Unscoped(). // Include soft-deleted records to check for restoration
-		Where(&streamPinQuery).
-		First(&streamPin).Error
+		// Check if the stream pin exists and belongs to the user (including soft-deleted)
+		streamPinQuery := pluginDb.StreamPin{
+			UserID:   uint64(userID),
+			StreamID: uint64(_stream.ID),
+		}
+		var streamPin pluginDb.StreamPin
+		if err := tx.Unscoped(). // Include soft-deleted records to check for restoration
+						Where(&streamPinQuery).
+						First(&streamPin).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// Pin doesn't exist (Unscoped query includes soft-deleted records)
+				s.Logger().Debug("Stream pin not found",
+					zap.Uint("userID", userID),
+					zap.Uint("streamID", _stream.ID),
+					zap.String("sdHash", sdHash))
+				_ = tx.AddError(gorm.ErrRecordNotFound)
+				return tx
+			}
+			_ = tx.AddError(fmt.Errorf("failed to check stream ownership: %w", err))
+			return tx
+		}
 
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Pin doesn't exist (Unscoped query includes soft-deleted records)
-			s.logger.Debug("Stream pin not found",
+		// If the pin is already soft-deleted, return success (idempotent)
+		if streamPin.DeletedAt.Valid {
+			s.Logger().Debug("Stream pin already deleted",
 				zap.Uint("userID", userID),
 				zap.Uint("streamID", _stream.ID),
 				zap.String("sdHash", sdHash))
-			return gorm.ErrRecordNotFound
+			streamPinDeleted = true
+			return tx
 		}
-		return fmt.Errorf("failed to check stream ownership: %w", err)
-	}
 
-	// If the pin is already soft-deleted, return success (idempotent)
-	if streamPin.DeletedAt.Valid {
-		s.logger.Debug("Stream pin already deleted",
+		// Delete only the stream pin record (soft delete)
+		if err := tx.Where(&streamPinQuery).
+			Delete(&pluginDb.StreamPin{}).Error; err != nil {
+			_ = tx.AddError(fmt.Errorf("failed to delete stream pin: %w", err))
+			return tx
+		}
+
+		s.Logger().Debug("Deleted stream pin",
 			zap.Uint("userID", userID),
 			zap.Uint("streamID", _stream.ID),
 			zap.String("sdHash", sdHash))
-		return nil
-	}
 
-	// Delete only the stream pin record (soft delete)
-	if err := s.db.WithContext(ctx).
-		Where(&streamPinQuery).
-		Delete(&pluginDb.StreamPin{}).Error; err != nil {
-		return fmt.Errorf("failed to delete stream pin: %w", err)
+		return tx
+	}); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) && streamPinDeleted {
+			return nil
+		}
+		return err
 	}
-
-	s.logger.Debug("Deleted stream pin",
-		zap.Uint("userID", userID),
-		zap.Uint("streamID", _stream.ID),
-		zap.String("sdHash", sdHash))
 
 	return nil
 }

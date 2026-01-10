@@ -119,7 +119,7 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 
 	// Prepare file upload with size limits
 	// Prepare the file upload with configured size limits from the core configuration
-	upload, err := ctx.PrepareFileUpload(int64(a.config.Config().Core.PostUploadLimit))
+	upload, err := ctx.PrepareFileUpload(int64(a.Config().Config().Core.PostUploadLimit))
 	if err != nil {
 		// If file preparation fails (e.g., file too large), return a bad request error
 		_ = ctx.Error(err, http.StatusBadRequest)

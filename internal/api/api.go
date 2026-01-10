@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -26,9 +27,7 @@ var _ core.APITusHandler = (*API)(nil)
 const TUS_HTTP_ROUTE = "/api/streams/upload/tus"
 
 type API struct {
-	ctx             core.Context
-	config          config.Manager
-	logger          *core.Logger
+	*core.BaseComponent
 	workflowService core.WorkflowService
 	uploadService   pluginCore.UploadService
 	deviceService   pluginCore.DeviceService
@@ -45,9 +44,6 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 	api := &API{}
 	return api, core.ContextOptions(
 		core.ContextWithStartupFunc(func(ctx core.Context) error {
-			api.ctx = ctx
-			api.config = ctx.Config()
-			api.logger = ctx.APILogger(api)
 			api.workflowService = core.GetService[core.WorkflowService](ctx, core.WORKFLOW_SERVICE)
 			api.uploadService = core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
 			api.deviceService = core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
@@ -57,7 +53,7 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 				return fmt.Errorf("failed to get storage protocol: %w", err)
 			}
 			proto := core.GetProtocol(internal.ProtocolName)
-			event.OnBootStartupFuncsCompleted(ctx, func(ctx core.Context) error {
+			event.OnBootStartupFuncsCompleted(ctx, func(ctx core.Context, _ context.Context) error {
 				var _tus core.TusHandler
 				var err error
 				_tus, err = service.CreateTusHandler(ctx, core.TUSHandlerConfig{
@@ -74,9 +70,9 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 							if err != nil {
 								return nil, err
 							}
-							defer closeUpload(upload, api.logger)
+							defer closeUpload(upload, api.Logger())
 
-							return getStreamUploadHash(upload, api.logger)
+							return getStreamUploadHash(upload, api.Logger())
 						},
 					),
 				})
@@ -92,6 +88,10 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 			return nil
 		}),
 	), nil
+}
+
+func (a *API) ID() string {
+	return a.Name()
 }
 
 func (a *API) Name() string {
@@ -110,11 +110,11 @@ func (a *API) GetTusHandler() core.TusHandler {
 	return a.tus
 }
 
-func (a *API) Config() config.APIConfig {
+func (a *API) GetConfig() config.APIConfig {
 	return &pluginConfig.APIConfig{}
 }
 func (a *API) Configure(r router.Router, accessService core.AccessService) error {
-	authMw := middleware.AuthMiddleware(a.ctx, middleware.WithAuthPurpose(jwt.PurposeLogin, jwt.PurposeAPI))
+	authMw := middleware.AuthMiddleware(a.Context(), middleware.WithAuthPurpose(jwt.PurposeLogin, jwt.PurposeAPI))
 
 	// Create the API group
 	group, err := r.Group("/api")
