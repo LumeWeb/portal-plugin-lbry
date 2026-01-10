@@ -111,7 +111,7 @@ func (a *API) handleDeviceCreate(c echo.Context) error {
 	// Create device
 	device, err := a.deviceService.CreateDevice(ctx.Request().Context(), uint(userID), req.Name, req.IPAddress)
 	if err != nil {
-		a.logger.Error("Failed to create device",
+		a.Logger().Error("Failed to create device",
 			zap.Error(err),
 			zap.String("name", req.Name),
 			zap.String("ip_address", req.IPAddress))
@@ -129,7 +129,7 @@ func (a *API) handleDeviceCreate(c echo.Context) error {
 		UpdatedAt: device.UpdatedAt,
 	}
 
-	a.logger.Info("Device created successfully",
+	a.Logger().Info("Device created successfully",
 		zap.Uint("device_id", device.ID),
 		zap.String("name", device.Name),
 		zap.String("ip_address", device.IPAddress))
@@ -166,7 +166,7 @@ func (a *API) handleDeviceUpdate(c echo.Context) error {
 
 	device, err := a.deviceService.UpdateDeviceName(ctx.Request().Context(), uint(userID), uint(deviceID), req.Name)
 	if err != nil {
-		a.logger.Error("Failed to update device",
+		a.Logger().Error("Failed to update device",
 			zap.Error(err),
 
 			zap.Uint("device_id", uint(deviceID)),
@@ -185,7 +185,7 @@ func (a *API) handleDeviceUpdate(c echo.Context) error {
 		UpdatedAt: device.UpdatedAt,
 	}
 
-	a.logger.Info("Device updated successfully",
+	a.Logger().Info("Device updated successfully",
 
 		zap.Uint("device_id", device.ID),
 		zap.String("name", device.Name))
@@ -254,11 +254,11 @@ func (a *API) handleDeviceGet(c echo.Context) error {
 	device, err := a.deviceService.GetDevice(ctx.Request().Context(), uint(userID), uint(deviceID))
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			a.logger.Error("Device not found",
+			a.Logger().Error("Device not found",
 				zap.Uint("device_id", uint(deviceID)))
 			_ = ctx.Error(NewError(ErrKeyDeviceGetFailed, err), http.StatusNotFound)
 		} else {
-			a.logger.Error("Failed to get device",
+			a.Logger().Error("Failed to get device",
 				zap.Error(err),
 				zap.Uint("device_id", uint(deviceID)))
 			_ = ctx.Error(NewError(ErrKeyDeviceGetFailed, err), http.StatusInternalServerError)
@@ -302,7 +302,7 @@ func (a *API) handleDeviceDelete(c echo.Context) error {
 	// Delete device (idempotent)
 	err = a.deviceService.DeleteDevice(ctx.Request().Context(), uint(userID), uint(deviceID))
 	if err != nil {
-		a.logger.Error("Failed to delete device",
+		a.Logger().Error("Failed to delete device",
 			zap.Error(err),
 
 			zap.Uint("device_id", uint(deviceID)))
@@ -310,7 +310,7 @@ func (a *API) handleDeviceDelete(c echo.Context) error {
 		return nil
 	}
 
-	a.logger.Info("Device deleted successfully",
+	a.Logger().Info("Device deleted successfully",
 
 		zap.Uint("device_id", uint(deviceID)))
 

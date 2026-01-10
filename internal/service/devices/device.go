@@ -7,8 +7,9 @@ import (
 	"net"
 
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
-	"go.lumeweb.com/portal-plugin-lbry/internal/db"
+	pluginDb "go.lumeweb.com/portal-plugin-lbry/internal/db"
 	"go.lumeweb.com/portal/core"
+	"go.lumeweb.com/portal/db"
 	"go.lumeweb.com/queryutil"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -16,28 +17,14 @@ import (
 
 // DeviceServiceDefault implements the DeviceService interface for LBRY protocol
 type DeviceServiceDefault struct {
-	ctx    core.Context
-	db     *gorm.DB
-	logger *core.Logger
+	*core.BaseComponent
 }
 
 // NewDeviceService creates a new LBRY device service instance
 func NewDeviceService() (core.Service, []core.ContextBuilderOption, error) {
 	service := &DeviceServiceDefault{}
 
-	return service, core.ContextOptions(
-		core.ContextWithStartupFunc(func(ctx core.Context) error {
-			service.ctx = ctx
-			service.db = ctx.DB()
-			service.logger = ctx.Logger()
-
-			if service.db == nil {
-				return fmt.Errorf("database not initialized")
-			}
-
-			return nil
-		}),
-	), nil
+	return service, nil, nil
 }
 
 // Name returns the service name
@@ -59,34 +46,42 @@ func (s *DeviceServiceDefault) validateIPAddress(ipAddress string) error {
 }
 
 // CreateDevice creates a new device in the whitelist
-func (s *DeviceServiceDefault) CreateDevice(ctx context.Context, userID uint, name, ipAddress string) (*db.Device, error) {
+func (s *DeviceServiceDefault) CreateDevice(ctx context.Context, userID uint, name, ipAddress string) (*pluginDb.Device, error) {
 	// Validate IP address
 	if err := s.validateIPAddress(ipAddress); err != nil {
 		return nil, err
 	}
 
-	// Check if device with this IP already exists
-	var existingDevice db.Device
-	err := s.db.WithContext(ctx).Where("ip_address = ?", ipAddress).First(&existingDevice).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("failed to check existing device: %w", err)
-	}
-	if err == nil {
-		return nil, fmt.Errorf("device with IP address %s already exists", ipAddress)
+	var device *pluginDb.Device
+	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		// Check if device with this IP already exists
+		var existingDevice pluginDb.Device
+		if err := tx.Where("ip_address = ?", ipAddress).First(&existingDevice).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = tx.AddError(fmt.Errorf("failed to check existing device: %w", err))
+			return tx
+		}
+		if existingDevice.ID != 0 {
+			_ = tx.AddError(fmt.Errorf("device with IP address %s already exists", ipAddress))
+			return tx
+		}
+
+		// Create new device
+		device = &pluginDb.Device{
+			UserID:    userID,
+			Name:      name,
+			IPAddress: ipAddress,
+		}
+
+		if err := tx.Create(device).Error; err != nil {
+			_ = tx.AddError(err)
+			return tx
+		}
+		return tx
+	}); err != nil {
+		return nil, err
 	}
 
-	// Create new device
-	device := &db.Device{
-		UserID:    userID,
-		Name:      name,
-		IPAddress: ipAddress,
-	}
-
-	if err := s.db.WithContext(ctx).Create(device).Error; err != nil {
-		return nil, fmt.Errorf("failed to create device: %w", err)
-	}
-
-	s.logger.Info("Device created successfully",
+	s.Logger().Info("Device created successfully",
 		zap.Uint("device_id", device.ID),
 		zap.String("name", name),
 		zap.String("ip_address", ipAddress))
@@ -95,48 +90,53 @@ func (s *DeviceServiceDefault) CreateDevice(ctx context.Context, userID uint, na
 }
 
 // UpdateDevice updates an existing device by ID (supports both name and IP for internal use)
-func (s *DeviceServiceDefault) UpdateDevice(ctx context.Context, userID, id uint, name, ipAddress string) (*db.Device, error) {
+func (s *DeviceServiceDefault) UpdateDevice(ctx context.Context, userID, id uint, name, ipAddress string) (*pluginDb.Device, error) {
 	// Validate IP address
 	if err := s.validateIPAddress(ipAddress); err != nil {
 		return nil, err
 	}
 
-	// Check if device exists and belongs to user
-	var device db.Device
-	err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&device).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
+	var device pluginDb.Device
+	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		// Check if device exists and belongs to user
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&device).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				_ = tx.AddError(err)
+				return tx
+			}
+			_ = tx.AddError(fmt.Errorf("failed to find device: %w", err))
+			return tx
 		}
-		return nil, fmt.Errorf("failed to find device: %w", err)
+
+		// Check if another device with this IP already exists
+		var existingDevice pluginDb.Device
+		if err := tx.Where("ip_address = ? AND id != ?", ipAddress, id).First(&existingDevice).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = tx.AddError(fmt.Errorf("failed to check existing device: %w", err))
+			return tx
+		}
+		if existingDevice.ID != 0 && existingDevice.ID != id {
+			_ = tx.AddError(fmt.Errorf("device with IP address %s already exists", ipAddress))
+			return tx
+		}
+
+		// Update device
+		updates := map[string]interface{}{
+			"name":       name,
+			"ip_address": ipAddress,
+		}
+
+		if err := tx.Model(&device).Updates(updates).Error; err != nil {
+			_ = tx.AddError(fmt.Errorf("failed to update device: %w", err))
+			return tx
+		}
+
+		// Refresh device data
+		return tx.First(&device, id)
+	}); err != nil {
+		return nil, err
 	}
 
-	// Check if another device with this IP already exists
-	var existingDevice db.Device
-	err = s.db.WithContext(ctx).Where("ip_address = ? AND id != ?", ipAddress, id).First(&existingDevice).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, fmt.Errorf("failed to check existing device: %w", err)
-	}
-	if err == nil {
-		return nil, fmt.Errorf("device with IP address %s already exists", ipAddress)
-	}
-
-	// Update device
-	updates := map[string]interface{}{
-		"name":       name,
-		"ip_address": ipAddress,
-	}
-
-	if err := s.db.WithContext(ctx).Model(&device).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("failed to update device: %w", err)
-	}
-
-	// Refresh device data
-	if err := s.db.WithContext(ctx).First(&device, id).Error; err != nil {
-		return nil, fmt.Errorf("failed to refresh device data: %w", err)
-	}
-
-	s.logger.Info("Device updated successfully",
+	s.Logger().Info("Device updated successfully",
 		zap.Uint("device_id", id),
 		zap.String("name", name),
 		zap.String("ip_address", ipAddress))
@@ -145,32 +145,36 @@ func (s *DeviceServiceDefault) UpdateDevice(ctx context.Context, userID, id uint
 }
 
 // UpdateDeviceName updates only the name of an existing device by ID
-func (s *DeviceServiceDefault) UpdateDeviceName(ctx context.Context, userID, id uint, name string) (*db.Device, error) {
-	// Check if device exists and belongs to user
-	var device db.Device
-	err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&device).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
+func (s *DeviceServiceDefault) UpdateDeviceName(ctx context.Context, userID, id uint, name string) (*pluginDb.Device, error) {
+	var device pluginDb.Device
+	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		// Check if device exists and belongs to user
+		if err := tx.Where("id = ? AND user_id = ?", id, userID).First(&device).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				_ = tx.AddError(err)
+				return tx
+			}
+			_ = tx.AddError(fmt.Errorf("failed to find device: %w", err))
+			return tx
 		}
-		return nil, fmt.Errorf("failed to find device: %w", err)
+
+		// Update device name only
+		updates := map[string]interface{}{
+			"name": name,
+		}
+
+		if err := tx.Model(&device).Updates(updates).Error; err != nil {
+			_ = tx.AddError(fmt.Errorf("failed to update device: %w", err))
+			return tx
+		}
+
+		// Refresh device data
+		return tx.First(&device, id)
+	}); err != nil {
+		return nil, err
 	}
 
-	// Update device name only
-	updates := map[string]interface{}{
-		"name": name,
-	}
-
-	if err := s.db.WithContext(ctx).Model(&device).Updates(updates).Error; err != nil {
-		return nil, fmt.Errorf("failed to update device: %w", err)
-	}
-
-	// Refresh device data
-	if err := s.db.WithContext(ctx).First(&device, id).Error; err != nil {
-		return nil, fmt.Errorf("failed to refresh device data: %w", err)
-	}
-
-	s.logger.Info("Device name updated successfully",
+	s.Logger().Info("Device name updated successfully",
 		zap.Uint("device_id", id),
 		zap.String("name", name))
 
@@ -178,9 +182,9 @@ func (s *DeviceServiceDefault) UpdateDeviceName(ctx context.Context, userID, id 
 }
 
 // GetDevice retrieves a device by ID
-func (s *DeviceServiceDefault) GetDevice(ctx context.Context, userID, id uint) (*db.Device, error) {
-	var device db.Device
-	err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&device).Error
+func (s *DeviceServiceDefault) GetDevice(ctx context.Context, userID, id uint) (*pluginDb.Device, error) {
+	var device pluginDb.Device
+	err := s.DB().WithContext(ctx).Where("id = ? AND user_id = ?", id, userID).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err
@@ -192,12 +196,12 @@ func (s *DeviceServiceDefault) GetDevice(ctx context.Context, userID, id uint) (
 }
 
 // ListDevices returns a paginated list of devices
-func (s *DeviceServiceDefault) ListDevices(ctx context.Context, userID uint, filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Device, int64, error) {
-	var devices []*db.Device
+func (s *DeviceServiceDefault) ListDevices(ctx context.Context, userID uint, filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*pluginDb.Device, int64, error) {
+	var devices []*pluginDb.Device
 	var total int64
 
 	// Build the base query with user filter
-	baseQuery := s.db.WithContext(ctx).Model(&db.Device{}).Where("user_id = ?", userID)
+	baseQuery := s.DB().WithContext(ctx).Model(&pluginDb.Device{}).Where("user_id = ?", userID)
 
 	// Apply filters to base query
 	filteredQuery := queryutil.ApplyFilters(baseQuery, filters, nil)
@@ -221,28 +225,34 @@ func (s *DeviceServiceDefault) ListDevices(ctx context.Context, userID uint, fil
 
 // DeleteDevice removes a device by ID (idempotent)
 func (s *DeviceServiceDefault) DeleteDevice(ctx context.Context, userID, id uint) error {
-	// First check if device exists at all
-	var device db.Device
-	err := s.db.WithContext(ctx).Where("id = ?", id).First(&device).Error
-	if err != nil {
+	var device pluginDb.Device
+	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+		// First check if device exists at all
+		if err := tx.Where("id = ?", id).First(&device).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				// Idempotent: device doesn't exist, return success (no error)
+				return tx
+			}
+			_ = tx.AddError(fmt.Errorf("failed to find device: %w", err))
+			return tx
+		}
+
+		// Check if device belongs to the user
+		if device.UserID != userID {
+			_ = tx.AddError(gorm.ErrRecordNotFound)
+			return tx
+		}
+
+		// Delete device (soft delete)
+		return tx.Delete(&device)
+	}); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			// Idempotent: device doesn't exist, return success
 			return nil
 		}
-		return fmt.Errorf("failed to find device: %w", err)
+		return err
 	}
 
-	// Check if device belongs to the user
-	if device.UserID != userID {
-		return gorm.ErrRecordNotFound
-	}
-
-	// Delete device (soft delete)
-	if err := s.db.WithContext(ctx).Delete(&device).Error; err != nil {
-		return fmt.Errorf("failed to delete device: %w", err)
-	}
-
-	s.logger.Info("Device deleted successfully",
+	s.Logger().Info("Device deleted successfully",
 		zap.Uint("device_id", id),
 		zap.String("name", device.Name),
 		zap.String("ip_address", device.IPAddress))
@@ -251,9 +261,9 @@ func (s *DeviceServiceDefault) DeleteDevice(ctx context.Context, userID, id uint
 }
 
 // GetDeviceByIPAddress retrieves a device by IP address
-func (s *DeviceServiceDefault) GetDeviceByIPAddress(ctx context.Context, ipAddress string) (*db.Device, error) {
-	var device db.Device
-	err := s.db.WithContext(ctx).Where("ip_address = ?", ipAddress).First(&device).Error
+func (s *DeviceServiceDefault) GetDeviceByIPAddress(ctx context.Context, ipAddress string) (*pluginDb.Device, error) {
+	var device pluginDb.Device
+	err := s.DB().WithContext(ctx).Where("ip_address = ?", ipAddress).First(&device).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, err

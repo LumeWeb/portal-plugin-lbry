@@ -85,8 +85,7 @@ func (a *accessControl) Allow(ctx context.Context, _ string, peerIP string) bool
 }
 
 type Protocol struct {
-	ctx            core.Context
-	db             *gorm.DB
+	*core.BaseComponent
 	node           server.Server
 	reflectorStore *ReflectorStore
 }
@@ -125,10 +124,10 @@ func (p Protocol) Workflows() []core.WorkflowDefinition {
 
 func (p Protocol) Operations() []core.Operation {
 	return []core.Operation{
-		NewRetrieveOperation(p.ctx),
-		NewPostUploadOperation(p.ctx),
-		NewReflectorAssemblyOperation(p.ctx),
-		service.NewTUSOperationHandler(p.ctx, p, func(ctx context.Context, helper core.OperationHelper, request *models.Request, tsReq *models.TUSRequest) error {
+		NewRetrieveOperation(p.Context()),
+		NewPostUploadOperation(p.Context()),
+		NewReflectorAssemblyOperation(p.Context()),
+		service.NewTUSOperationHandler(p.Context(), p, func(ctx context.Context, helper core.OperationHelper, request *models.Request, tsReq *models.TUSRequest) error {
 			// Validate request using shared utility
 			if err := ValidateRequest(request); err != nil {
 				return err
@@ -171,6 +170,10 @@ func (p Protocol) Name() string {
 	return internal.ProtocolName
 }
 
+func (p Protocol) ID() string {
+	return p.Name()
+}
+
 func (p Protocol) DisplayName() string {
 	return internal.ProtocolDisplayName
 }
@@ -183,7 +186,7 @@ func (p Protocol) Hash(_ io.Reader, _ uint64) (core.StorageHash, error) {
 	return nil, errors.New("not implemented")
 }
 
-func (p Protocol) Config() config.ProtocolConfig {
+func (p Protocol) GetConfig() config.ProtocolConfig {
 	return &pluginConfig.ProtocolConfig{}
 }
 func NewProtocol() (core.Protocol, []core.ContextBuilderOption, error) {
@@ -191,9 +194,6 @@ func NewProtocol() (core.Protocol, []core.ContextBuilderOption, error) {
 
 	opts := core.ContextOptions(
 		core.ContextWithStartupFunc(func(ctx core.Context) error {
-			proto.ctx = ctx
-			proto.db = ctx.DB()
-
 			// Initialize ReflectorStore
 			reflectorStore, err := NewReflectorStore(ctx)
 			if err != nil {
