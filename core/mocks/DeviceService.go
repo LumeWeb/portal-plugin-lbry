@@ -9,7 +9,10 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
+	"go.lumeweb.com/portal/config"
+	"go.lumeweb.com/portal/core"
 	"go.lumeweb.com/queryutil"
+	"gorm.io/gorm"
 )
 
 // NewMockDeviceService creates a new instance of MockDeviceService. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
@@ -37,6 +40,98 @@ type MockDeviceService_Expecter struct {
 
 func (_m *MockDeviceService) EXPECT() *MockDeviceService_Expecter {
 	return &MockDeviceService_Expecter{mock: &_m.Mock}
+}
+
+// Config provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) Config() config.Manager {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Config")
+	}
+
+	var r0 config.Manager
+	if returnFunc, ok := ret.Get(0).(func() config.Manager); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(config.Manager)
+		}
+	}
+	return r0
+}
+
+// MockDeviceService_Config_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Config'
+type MockDeviceService_Config_Call struct {
+	*mock.Call
+}
+
+// Config is a helper method to define mock.On call
+func (_e *MockDeviceService_Expecter) Config() *MockDeviceService_Config_Call {
+	return &MockDeviceService_Config_Call{Call: _e.mock.On("Config")}
+}
+
+func (_c *MockDeviceService_Config_Call) Run(run func()) *MockDeviceService_Config_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_Config_Call) Return(manager config.Manager) *MockDeviceService_Config_Call {
+	_c.Call.Return(manager)
+	return _c
+}
+
+func (_c *MockDeviceService_Config_Call) RunAndReturn(run func() config.Manager) *MockDeviceService_Config_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Context provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) Context() core.Context {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Context")
+	}
+
+	var r0 core.Context
+	if returnFunc, ok := ret.Get(0).(func() core.Context); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(core.Context)
+		}
+	}
+	return r0
+}
+
+// MockDeviceService_Context_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Context'
+type MockDeviceService_Context_Call struct {
+	*mock.Call
+}
+
+// Context is a helper method to define mock.On call
+func (_e *MockDeviceService_Expecter) Context() *MockDeviceService_Context_Call {
+	return &MockDeviceService_Context_Call{Call: _e.mock.On("Context")}
+}
+
+func (_c *MockDeviceService_Context_Call) Run(run func()) *MockDeviceService_Context_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_Context_Call) Return(context core.Context) *MockDeviceService_Context_Call {
+	_c.Call.Return(context)
+	return _c
+}
+
+func (_c *MockDeviceService_Context_Call) RunAndReturn(run func() core.Context) *MockDeviceService_Context_Call {
+	_c.Call.Return(run)
+	return _c
 }
 
 // CreateDevice provides a mock function for the type MockDeviceService
@@ -115,6 +210,52 @@ func (_c *MockDeviceService_CreateDevice_Call) Return(device *db.Device, err err
 }
 
 func (_c *MockDeviceService_CreateDevice_Call) RunAndReturn(run func(ctx context.Context, userID uint, name string, ipAddress string) (*db.Device, error)) *MockDeviceService_CreateDevice_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DB provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) DB() *gorm.DB {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for DB")
+	}
+
+	var r0 *gorm.DB
+	if returnFunc, ok := ret.Get(0).(func() *gorm.DB); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*gorm.DB)
+		}
+	}
+	return r0
+}
+
+// MockDeviceService_DB_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DB'
+type MockDeviceService_DB_Call struct {
+	*mock.Call
+}
+
+// DB is a helper method to define mock.On call
+func (_e *MockDeviceService_Expecter) DB() *MockDeviceService_DB_Call {
+	return &MockDeviceService_DB_Call{Call: _e.mock.On("DB")}
+}
+
+func (_c *MockDeviceService_DB_Call) Run(run func()) *MockDeviceService_DB_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_DB_Call) Return(dB *gorm.DB) *MockDeviceService_DB_Call {
+	_c.Call.Return(dB)
+	return _c
+}
+
+func (_c *MockDeviceService_DB_Call) RunAndReturn(run func() *gorm.DB) *MockDeviceService_DB_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -457,6 +598,212 @@ func (_c *MockDeviceService_ListDevices_Call) Return(devices []*db.Device, n int
 
 func (_c *MockDeviceService_ListDevices_Call) RunAndReturn(run func(ctx context.Context, userID uint, filters []queryutil.CrudFilter, sorts []queryutil.Sort, pagination queryutil.Pagination) ([]*db.Device, int64, error)) *MockDeviceService_ListDevices_Call {
 	_c.Call.Return(run)
+	return _c
+}
+
+// Logger provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) Logger() *core.Logger {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for Logger")
+	}
+
+	var r0 *core.Logger
+	if returnFunc, ok := ret.Get(0).(func() *core.Logger); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*core.Logger)
+		}
+	}
+	return r0
+}
+
+// MockDeviceService_Logger_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Logger'
+type MockDeviceService_Logger_Call struct {
+	*mock.Call
+}
+
+// Logger is a helper method to define mock.On call
+func (_e *MockDeviceService_Expecter) Logger() *MockDeviceService_Logger_Call {
+	return &MockDeviceService_Logger_Call{Call: _e.mock.On("Logger")}
+}
+
+func (_c *MockDeviceService_Logger_Call) Run(run func()) *MockDeviceService_Logger_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_Logger_Call) Return(logger *core.Logger) *MockDeviceService_Logger_Call {
+	_c.Call.Return(logger)
+	return _c
+}
+
+func (_c *MockDeviceService_Logger_Call) RunAndReturn(run func() *core.Logger) *MockDeviceService_Logger_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SetConfig provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) SetConfig(cfg config.Manager) {
+	_mock.Called(cfg)
+	return
+}
+
+// MockDeviceService_SetConfig_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetConfig'
+type MockDeviceService_SetConfig_Call struct {
+	*mock.Call
+}
+
+// SetConfig is a helper method to define mock.On call
+//   - cfg config.Manager
+func (_e *MockDeviceService_Expecter) SetConfig(cfg interface{}) *MockDeviceService_SetConfig_Call {
+	return &MockDeviceService_SetConfig_Call{Call: _e.mock.On("SetConfig", cfg)}
+}
+
+func (_c *MockDeviceService_SetConfig_Call) Run(run func(cfg config.Manager)) *MockDeviceService_SetConfig_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 config.Manager
+		if args[0] != nil {
+			arg0 = args[0].(config.Manager)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_SetConfig_Call) Return() *MockDeviceService_SetConfig_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockDeviceService_SetConfig_Call) RunAndReturn(run func(cfg config.Manager)) *MockDeviceService_SetConfig_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetContext provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) SetContext(ctx core.Context) {
+	_mock.Called(ctx)
+	return
+}
+
+// MockDeviceService_SetContext_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetContext'
+type MockDeviceService_SetContext_Call struct {
+	*mock.Call
+}
+
+// SetContext is a helper method to define mock.On call
+//   - ctx core.Context
+func (_e *MockDeviceService_Expecter) SetContext(ctx interface{}) *MockDeviceService_SetContext_Call {
+	return &MockDeviceService_SetContext_Call{Call: _e.mock.On("SetContext", ctx)}
+}
+
+func (_c *MockDeviceService_SetContext_Call) Run(run func(ctx core.Context)) *MockDeviceService_SetContext_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 core.Context
+		if args[0] != nil {
+			arg0 = args[0].(core.Context)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_SetContext_Call) Return() *MockDeviceService_SetContext_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockDeviceService_SetContext_Call) RunAndReturn(run func(ctx core.Context)) *MockDeviceService_SetContext_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetDB provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) SetDB(db1 *gorm.DB) {
+	_mock.Called(db1)
+	return
+}
+
+// MockDeviceService_SetDB_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetDB'
+type MockDeviceService_SetDB_Call struct {
+	*mock.Call
+}
+
+// SetDB is a helper method to define mock.On call
+//   - db1 *gorm.DB
+func (_e *MockDeviceService_Expecter) SetDB(db1 interface{}) *MockDeviceService_SetDB_Call {
+	return &MockDeviceService_SetDB_Call{Call: _e.mock.On("SetDB", db1)}
+}
+
+func (_c *MockDeviceService_SetDB_Call) Run(run func(db1 *gorm.DB)) *MockDeviceService_SetDB_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *gorm.DB
+		if args[0] != nil {
+			arg0 = args[0].(*gorm.DB)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_SetDB_Call) Return() *MockDeviceService_SetDB_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockDeviceService_SetDB_Call) RunAndReturn(run func(db1 *gorm.DB)) *MockDeviceService_SetDB_Call {
+	_c.Run(run)
+	return _c
+}
+
+// SetLogger provides a mock function for the type MockDeviceService
+func (_mock *MockDeviceService) SetLogger(logger *core.Logger) {
+	_mock.Called(logger)
+	return
+}
+
+// MockDeviceService_SetLogger_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SetLogger'
+type MockDeviceService_SetLogger_Call struct {
+	*mock.Call
+}
+
+// SetLogger is a helper method to define mock.On call
+//   - logger *core.Logger
+func (_e *MockDeviceService_Expecter) SetLogger(logger interface{}) *MockDeviceService_SetLogger_Call {
+	return &MockDeviceService_SetLogger_Call{Call: _e.mock.On("SetLogger", logger)}
+}
+
+func (_c *MockDeviceService_SetLogger_Call) Run(run func(logger *core.Logger)) *MockDeviceService_SetLogger_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 *core.Logger
+		if args[0] != nil {
+			arg0 = args[0].(*core.Logger)
+		}
+		run(
+			arg0,
+		)
+	})
+	return _c
+}
+
+func (_c *MockDeviceService_SetLogger_Call) Return() *MockDeviceService_SetLogger_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockDeviceService_SetLogger_Call) RunAndReturn(run func(logger *core.Logger)) *MockDeviceService_SetLogger_Call {
+	_c.Run(run)
 	return _c
 }
 

@@ -179,6 +179,118 @@ func TestUploadServiceDefault_HandleUpload(t *testing.T) {
 	}
 }
 
+func TestUploadServiceDefault_GetStreamSize(t *testing.T) {
+	tests := []struct {
+		name          string
+		streamID      uint64
+		setupData     func(ctx coreTesting.TestContext) uint64
+		expectSize    int64
+		expectError   bool
+		expectedError string
+		description   string
+	}{
+		{
+			name:     "stream with single blob",
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) uint64 {
+				stream := createTestStream(ctx, "test_stream_1", testUploadHash1)
+				blob := createTestBlob(ctx, testUploadHash1, 1024, nil)
+				createTestStreamBlob(ctx, uint64(stream.ID), uint64(blob.ID), 1)
+				return uint64(stream.ID)
+			},
+			expectSize:  1024,
+			expectError: false,
+			description: "should return correct size for stream with single blob",
+		},
+		{
+			name:     "stream with multiple blobs",
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) uint64 {
+				stream := createTestStream(ctx, "test_stream_2", testUploadHash2)
+				blob1 := createTestBlob(ctx, testUploadHash1, 1024, nil)
+				blob2 := createTestBlob(ctx, testUploadHash2, 2048, nil)
+				blob3 := createTestBlob(ctx, testUploadHash3, 3072, nil)
+				createTestStreamBlob(ctx, uint64(stream.ID), uint64(blob1.ID), 1)
+				createTestStreamBlob(ctx, uint64(stream.ID), uint64(blob2.ID), 2)
+				createTestStreamBlob(ctx, uint64(stream.ID), uint64(blob3.ID), 3)
+				return uint64(stream.ID)
+			},
+			expectSize:  6144, // 1024 + 2048 + 3072
+			expectError: false,
+			description: "should sum sizes of all blobs in stream",
+		},
+		{
+			name:     "stream with no blobs",
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) uint64 {
+				stream := createTestStream(ctx, "empty_stream", testUploadHash3)
+				// Don't create any blobs
+				return uint64(stream.ID)
+			},
+			expectSize:  0,
+			expectError: false,
+			description: "should return 0 for stream with no blobs",
+		},
+		{
+			name:     "nonexistent stream",
+			streamID: 99999,
+			setupData: func(ctx coreTesting.TestContext) uint64 {
+				// Create a stream but don't use it
+				createTestStream(ctx, "other_stream", testUploadHash1)
+				return 99999
+			},
+			expectSize:  0,
+			expectError: false,
+			description: "should return 0 for nonexistent stream",
+		},
+		{
+			name:     "stream with zero-size blobs",
+			streamID: 1,
+			setupData: func(ctx coreTesting.TestContext) uint64 {
+				stream := createTestStream(ctx, "zero_blob_stream", testUploadHash4)
+				blob1 := createTestBlob(ctx, testUploadHash1, 0, nil)
+				blob2 := createTestBlob(ctx, testUploadHash2, 0, nil)
+				createTestStreamBlob(ctx, uint64(stream.ID), uint64(blob1.ID), 1)
+				createTestStreamBlob(ctx, uint64(stream.ID), uint64(blob2.ID), 2)
+				return uint64(stream.ID)
+			},
+			expectSize:  0,
+			expectError: false,
+			description: "should handle streams with zero-size blobs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
+				// Arrange
+				uploadsvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
+				require.NotNil(tb, uploadsvc)
+
+				// Setup test data and get stream ID
+				streamID := tt.setupData(ctx)
+				if tt.streamID != 0 && tt.streamID != 99999 {
+					tt.streamID = streamID
+				}
+
+				// Act
+				size, err := uploadsvc.GetStreamSize(context.Background(), tt.streamID)
+
+				// Assert
+				if tt.expectError {
+					assert.Error(tb, err)
+					if tt.expectedError != "" {
+						assert.Contains(tb, err.Error(), tt.expectedError)
+					}
+				} else {
+					assert.NoError(tb, err)
+					assert.Equal(tb, tt.expectSize, size)
+				}
+			}, getTestOptions())
+		})
+	}
+}
+
 func TestUploadServiceDefault_GetPendingBlobCount(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1491,6 +1603,20 @@ func createTestStreamBlob(ctx coreTesting.TestContext, streamID uint64, blobID u
 	err := ctx.DB().Create(blob).Error
 	if err != nil {
 		ctx.T().Fatalf("Failed to create test stream blob: %v", err)
+	}
+	return blob
+}
+
+func createTestBlob(ctx coreTesting.TestContext, blobHash string, blobSize int, iv []byte) *pluginDb.Blob {
+	blob := &pluginDb.Blob{
+		BlobHash:    blobHash,
+		BlobSize:    blobSize,
+		IVData:      iv,
+		Terminating: false,
+	}
+	err := ctx.DB().Create(blob).Error
+	if err != nil {
+		ctx.T().Fatalf("Failed to create test blob: %v", err)
 	}
 	return blob
 }

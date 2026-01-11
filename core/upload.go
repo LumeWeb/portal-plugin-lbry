@@ -53,6 +53,9 @@ type UploadService interface {
 
 	// MarkPendingBlobAsReceived marks an existing pending blob as received without changing other fields
 	MarkPendingBlobAsReceived(ctx context.Context, userID, deviceID uint, blobInfo *stream.BlobInfo) error
+
+	// GetStreamSize returns the total size of all blobs for a given stream
+	GetStreamSize(ctx context.Context, streamID uint64) (int64, error)
 }
 
 // Upload service name
