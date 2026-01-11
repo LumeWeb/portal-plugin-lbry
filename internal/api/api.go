@@ -48,10 +48,6 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 			api.uploadService = core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
 			api.deviceService = core.GetService[pluginCore.DeviceService](ctx, pluginCore.DEVICE_SERVICE)
 
-			sproto, err := protocol.GetStorageProtocol()
-			if err != nil {
-				return fmt.Errorf("failed to get storage protocol: %w", err)
-			}
 			proto := core.GetProtocol(internal.ProtocolName)
 			event.OnBootStartupFuncsCompleted(ctx, func(ctx core.Context, _ context.Context) error {
 				var _tus core.TusHandler
@@ -65,14 +61,8 @@ func NewAPI() (core.API, []core.ContextBuilderOption, error) {
 					UploadProgressHandler:   service.TUSDefaultUploadProgressHandler(ctx),
 					TerminatedUploadHandler: service.TUSDefaultUploadTerminatedHandler(ctx),
 					CompletedUploadHandler: service.TUSDefaultUploadCompletedHandler(ctx, nil, protocol.TUS_UPLOAD_WORKFLOW,
-						func(handlr core.TusHandler, hook handler.HookEvent) (core.StorageHash, error) {
-							upload, err := handlr.UploadReader(ctx, hook.Upload.ID, sproto, 0)
-							if err != nil {
-								return nil, err
-							}
-							defer closeUpload(upload, api.Logger())
-
-							return getStreamUploadHash(upload, api.Logger())
+						func(handlr core.TusHandler, hook handler.HookEvent, reader io.Reader) (core.StorageHash, error) {
+							return getStreamUploadHash(reader, api.Logger())
 						},
 					),
 				})
@@ -151,7 +141,7 @@ func closeUpload(upload io.ReadCloser, logger *core.Logger) {
 	}
 }
 
-func getStreamUploadHash(upload io.ReadCloser, logger *core.Logger) (core.StorageHash, error) {
+func getStreamUploadHash(upload io.Reader, logger *core.Logger) (core.StorageHash, error) {
 	hash, err := lbrycrypto.NewHasher().HashReader(upload)
 	if err != nil {
 		logger.Error("Failed to hash stream upload", zap.Error(err))
