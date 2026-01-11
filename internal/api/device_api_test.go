@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -76,11 +77,11 @@ func createTestUserAndLoginForDevice(ctx coreTesting.TestContext) (string, uint)
 	require.NotNil(ctx.T(), authSvc)
 
 	// Create test user
-	user, err := userSvc.CreateAccount(TestEmail, TestPassword, false)
+	user, err := userSvc.CreateAccount(context.Background(), TestEmail, TestPassword, false)
 	require.NoError(ctx.T(), err)
 
 	// Login to get token
-	token, _, err := authSvc.LoginPassword(TestEmail, TestPassword, TestIP, false)
+	token, _, err := authSvc.LoginPassword(context.Background(), TestEmail, TestPassword, TestIP, false)
 	require.NoError(ctx.T(), err)
 
 	return token, user.ID

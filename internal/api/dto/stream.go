@@ -37,6 +37,9 @@ type StreamResponse struct {
 
 	// UpdatedAt is when the stream was last updated
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// Size is the total size of all blobs in the stream (in bytes)
+	Size int64 `json:"size"`
 }
 
 // FromModel creates a StreamResponse from a model

@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -79,12 +80,12 @@ func createTestUserAndLogin(ctx coreTesting.TestContext) (string, uint) {
 	userSvc := core.GetService[core.UserService](ctx, core.USER_SERVICE)
 	authSvc := core.GetService[core.AuthService](ctx, core.AUTH_SERVICE)
 
-	user, err := userSvc.CreateAccount(TestEmail, TestPassword, false)
+	user, err := userSvc.CreateAccount(context.Background(), TestEmail, TestPassword, false)
 	if err != nil {
 		ctx.T().Fatalf("failed to create test user: %v", err)
 	}
 
-	token, _, err := authSvc.LoginPassword(TestEmail, TestPassword, TestIP, false)
+	token, _, err := authSvc.LoginPassword(context.Background(), TestEmail, TestPassword, TestIP, false)
 	if err != nil {
 		ctx.T().Fatalf("failed to login test user: %v", err)
 	}

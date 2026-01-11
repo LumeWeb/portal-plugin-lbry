@@ -895,6 +895,24 @@ func (s *UploadServiceDefault) ListStreams(ctx context.Context, userID uint, fil
 	return streams, total, nil
 }
 
+// GetStreamSize returns the total size of all blobs for a given stream
+func (s *UploadServiceDefault) GetStreamSize(ctx context.Context, streamID uint64) (int64, error) {
+	var totalSize int64
+
+	err := s.DB().WithContext(ctx).
+		Model(&pluginDb.StreamBlob{}).
+		Joins("INNER JOIN lbry_blobs ON lbry_stream_blobs.blob_id = lbry_blobs.id").
+		Where("lbry_stream_blobs.stream_id = ?", streamID).
+		Select("COALESCE(SUM(lbry_blobs.blob_size), 0)").
+		Scan(&totalSize).Error
+
+	if err != nil {
+		return 0, fmt.Errorf("failed to calculate stream size: %w", err)
+	}
+
+	return totalSize, nil
+}
+
 // GetPendingStream retrieves pending stream metadata by user ID and SD hash
 func (s *UploadServiceDefault) GetPendingStream(ctx context.Context, userID uint, sdHash string) (*pluginDb.PendingStream, error) {
 	var pendingStream pluginDb.PendingStream

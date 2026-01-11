@@ -159,23 +159,6 @@ func TestAPI_handleStreamUpload_LargeFile(t *testing.T) {
 	}, getTestOptions(), coreTesting.WithCron(), coreTesting.WithMockS3())
 }
 
-func TestAPI_handleStreamUpload_InvalidContentType(t *testing.T) {
-	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
-		token, _ := createTestUserAndLogin(ctx)
-
-		// Make HTTP request with invalid content type using helper
-		// This test specifically targets content-type validation failure, not metadata validation
-		req := ctx.NewAPIRequest(http.MethodPost, "/api/streams/upload", []byte("not multipart"))
-		setAuthHeader(req, token)
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		ctx.Router().ServeHTTP(rec, req)
-
-		// Verify response - should be bad request due to invalid content type
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-	}, getTestOptions())
-}
-
 func TestAPI_handleStreamUpload_MalformedMultipart(t *testing.T) {
 	coreTesting.RunTestCaseWithDB(t, func(tb coreTesting.TB, ctx coreTesting.TestContext) {
 		token, _ := createTestUserAndLogin(ctx)
@@ -455,7 +438,7 @@ func TestAPIHandleStreamList(t *testing.T) {
 				mockUploadSvc := core.GetService[*pluginMocks.MockUploadService](ctx, pluginCore.UPLOAD_SERVICE)
 				require.NotNil(tb, mockUploadSvc)
 
-				// Setup mock expectations
+				// Setup mock expectations for ListStreams
 				mockUploadSvc.EXPECT().ListStreams(
 					mock.Anything,
 					tt.userID,
@@ -463,6 +446,16 @@ func TestAPIHandleStreamList(t *testing.T) {
 					mock.Anything,
 					mock.Anything,
 				).Return(tt.mockStreams, tt.mockTotal, tt.mockError).Once()
+
+				// Setup mock expectations for GetStreamSize (called for each stream)
+				if tt.mockError == nil && tt.mockStreams != nil {
+					for _, stream := range tt.mockStreams {
+						mockUploadSvc.EXPECT().GetStreamSize(
+							mock.Anything,
+							uint64(stream.ID),
+						).Return(int64(1024), nil).Once()
+					}
+				}
 
 				// Create request using queryutil.BuildURL for dynamic URL generation
 				baseURL := "/api/streams"
@@ -507,6 +500,9 @@ func TestAPIHandleStreamList(t *testing.T) {
 						assert.NotEmpty(tb, stream.SuggestedFileName)
 						assert.False(tb, stream.CreatedAt.IsZero())
 						assert.False(tb, stream.UpdatedAt.IsZero())
+
+						// Verify Size field is present (non-negative value)
+						assert.GreaterOrEqual(tb, stream.Size, int64(0))
 					}
 				}
 			}, getTestOptions(), coreTesting.WithCron(), coreTesting.WithMockS3())

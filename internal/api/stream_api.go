@@ -269,6 +269,7 @@ func (a *API) handleStreamList(c echo.Context) error {
 		},
 		// Convert domain entities to DTOs
 		func(stream *db.Stream) *dto.StreamResponse {
+			size, _ := a.uploadService.GetStreamSize(ctx.Request().Context(), uint64(stream.ID))
 			return &dto.StreamResponse{
 				ID:                uint64(stream.ID),
 				StreamHash:        stream.StreamHash,
@@ -278,6 +279,7 @@ func (a *API) handleStreamList(c echo.Context) error {
 				SuggestedFileName: stream.SuggestedFileName,
 				CreatedAt:         stream.CreatedAt,
 				UpdatedAt:         stream.UpdatedAt,
+				Size:              size,
 			}
 		},
 		// Configure search and sort options
