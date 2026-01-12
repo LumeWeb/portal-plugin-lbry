@@ -62,8 +62,7 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 		}
 	}(reader)
 
-	manifestCreator := stream.NewManifestCreator()
-	streamCreator := stream.NewStreamCreator(manifestCreator)
+	streamCreator := stream.NewStreamCreator()
 
 	// Prepare stream options - include metadata if provided
 	var streamOpts []stream.StreamOption
