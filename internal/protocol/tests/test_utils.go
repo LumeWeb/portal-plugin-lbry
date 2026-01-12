@@ -51,16 +51,12 @@ func GetPluginTestOptions() []coreTesting.TestContextBuilderOption {
 
 	return []coreTesting.TestContextBuilderOption{
 		coreTesting.WithPlugins(info.GetPluginInfo()),
-
-		coreTesting.WithConfig("plugin.lbry.protocol.peer_port", uint(freePeerPort)),
-		coreTesting.WithConfig("plugin.lbry.protocol.dht_port", uint(freeDhtPort)),
-		coreTesting.WithConfig("plugin.lbry.protocol.reflector_port", uint(freeReflectorPort)),
-		coreTesting.WithConfig("plugin.lbry.protocol.fixed_peers", []string{"s1.lbry.network:4444"}),
 		coreTesting.WithAPIID(internal.ProtocolName),
 		coreTesting.WithProtocolConfig(internal.ProtocolName, pluginConfig.ProtocolConfig{
 			PeerPort:      uint(freePeerPort),
 			DHTPort:       uint(freeDhtPort),
 			ReflectorPort: uint(freeReflectorPort),
+			FixedPeers:    []string{"s1.lbry.network:4444"},
 		}),
 		coreTesting.WithMockS3(),
 	}

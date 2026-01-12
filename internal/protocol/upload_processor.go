@@ -73,24 +73,13 @@ func (p *UploadProcessor) ProcessStreamUpload(ctx context.Context, source Upload
 		return blobManager.AddBlob(ctx, chunk.Hash, chunk.Data)
 	}))
 
-	// Create SD blob for metadata
-	sdBlob := &stream.SDBlob{}
-
-	// Apply metadata from upload source
+	// Apply metadata from upload source using stream options
 	metadata := source.GetMetadata()
-	applyMetadataToSDBlob(sdBlob, metadata)
-
-	sdBlob.StreamType = stream.StreamTypeLBRYFile
-
-	// Add SD handler if we have metadata
-	if sdBlob.StreamName != "" || sdBlob.SuggestedFileName != "" {
-		blob, err := sdBlob.ToBlob()
-		if err != nil {
-			return nil, fmt.Errorf("failed to serialize SD blob: %w", err)
-		}
-
-		streamOpts = append(streamOpts,
-			stream.WithExistingSDBlob(blob))
+	if streamName, ok := metadata["stream_name"]; ok && streamName != "" {
+		streamOpts = append(streamOpts, stream.WithStreamName(streamName))
+	}
+	if suggestedFileName, ok := metadata["suggested_file_name"]; ok && suggestedFileName != "" {
+		streamOpts = append(streamOpts, stream.WithSuggestedFileName(suggestedFileName))
 	}
 
 	// Create stream

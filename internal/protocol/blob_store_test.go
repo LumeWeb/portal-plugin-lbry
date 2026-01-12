@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
-	"go.lumeweb.com/liblbry/blob"
 	"go.lumeweb.com/liblbry/stream"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal-plugin-lbry/internal/db"
@@ -1031,6 +1030,75 @@ func TestLBRYBlobStore_Put_LargeBlob(t *testing.T) {
 		ast.Equal(len(largeData), blob.BlobSize)
 
 		// No need to call mockStorage.AssertExpectations(tb)
+	})
+}
+
+func TestLBRYBlobStore_BuildBlobInfosFromDb_TerminatingBlobWithIV(t *testing.T) {
+	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) {
+		// Arrange
+		ast := assert.New(tb)
+		store, err := NewLBRYBlobStore(ctx)
+		require.NoError(tb, err)
+
+		terminatingBlobNum := 2
+		terminatingIV := []byte("termin_iv_16bytes")
+
+		// Create test stream with terminating blob number and IV
+		testStream := db.Stream{
+			StreamHash:            "test_stream_hash_term",
+			SDHash:                "test_sd_hash_term",
+			StreamName:            "terminating_test",
+			StreamType:            "video",
+			SuggestedFileName:     "terminating.mp4",
+			KeyData:               []byte("terminating_key"),
+			TerminatingBlobNumber: &terminatingBlobNum,
+			TerminatingBlobIV:     terminatingIV,
+		}
+		err = ctx.DB().Create(&testStream).Error
+		require.NoError(tb, err)
+
+		// Create test blob with proper hex-encoded hash
+		testBlobHashBytes := []byte{0x61, 0x62, 0x63, 0x64}
+		testBlobHashHex := hex.EncodeToString(testBlobHashBytes)
+		testIV := []byte("test_iv_16_bytes")
+
+		testBlob := db.Blob{
+			BlobHash: testBlobHashHex,
+			BlobSize: 1024,
+			IVData:   testIV,
+		}
+		err = ctx.DB().Create(&testBlob).Error
+		require.NoError(tb, err)
+
+		// Create stream-blob association
+		streamBlob := db.StreamBlob{
+			StreamID:   uint64(testStream.ID),
+			BlobID:     uint64(testBlob.ID),
+			BlobNumber: 0,
+		}
+		err = ctx.DB().Create(&streamBlob).Error
+		require.NoError(tb, err)
+
+		// Act - call buildBlobInfosFromDb
+		blobInfos, err := store.buildBlobInfosFromDb(t.Context(), testStream.ID)
+
+		// Assert
+		require.NoError(tb, err)
+		ast.Len(blobInfos, 2, "Should return two blob infos (regular + terminating)")
+
+		// Verify regular blob
+		regularBlob := blobInfos[0]
+		ast.Equal(testBlobHashBytes, regularBlob.BlobHash)
+		ast.Equal(1024, regularBlob.Length)
+		ast.Equal(0, regularBlob.BlobNum)
+		ast.Equal(testIV, regularBlob.IV)
+
+		// Verify terminating blob has correct IV
+		terminatingBlob := blobInfos[1]
+		ast.Empty(terminatingBlob.BlobHash, "Terminating blob should have empty hash")
+		ast.Equal(0, terminatingBlob.Length, "Terminating blob should have zero length")
+		ast.Equal(terminatingBlobNum, terminatingBlob.BlobNum, "Terminating blob should have correct blob number")
+		ast.Equal(terminatingIV, terminatingBlob.IV, "Terminating blob should have correct IV")
 	})
 }
 

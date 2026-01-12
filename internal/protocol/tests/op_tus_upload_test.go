@@ -38,7 +38,8 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 		testData := []byte(TestTUSStreamContent)
 
 		// Create test user
-		testUser, err := userSvc.CreateAccount(TestUserEmail, TestUserPassword, false)
+		reqCtx := context.Background()
+		testUser, err := userSvc.CreateAccount(reqCtx, TestUserEmail, TestUserPassword, false)
 		require.NoError(tb, err)
 
 		// --- TUS Upload Setup ---
@@ -48,7 +49,6 @@ func TestTUSUploadOperationHandler_Execute_Integration(t *testing.T) {
 		uploaderIp := TestSourceIP
 
 		// Create a temporary upload to get the hash using the upload service
-		reqCtx := context.Background()
 		uploadSvc := core.GetService[pluginCore.UploadService](ctx, pluginCore.UPLOAD_SERVICE)
 		uploadCID, tempUploadID, err := uploadSvc.HandleUpload(reqCtx, internal.NewReadSeekCloser(testData))
 		require.NoError(tb, err)

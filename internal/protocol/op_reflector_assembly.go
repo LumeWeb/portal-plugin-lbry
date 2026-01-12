@@ -392,7 +392,7 @@ func (h *ReflectorAssemblyOperationHandler) buildSDBlob(ctx context.Context, upl
 	}
 
 	// Get associated blobs using upload service
-	blobInfos, err := h.getBlobInfosFromPendingBlobs(ctx, uploadService, pendingStream.UserID, pendingStream.SDHash, pendingStream.TerminatingBlobNumber)
+	blobInfos, err := h.getBlobInfosFromPendingBlobs(ctx, uploadService, pendingStream.UserID, pendingStream.SDHash, pendingStream.TerminatingBlobNumber, pendingStream.TerminatingBlobIV)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get associated blobs for pending stream %q: %w", pendingStream.SDHash, err)
 	}
@@ -403,7 +403,7 @@ func (h *ReflectorAssemblyOperationHandler) buildSDBlob(ctx context.Context, upl
 }
 
 // getBlobInfosFromPendingBlobs retrieves blob information using upload service
-func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx context.Context, uploadService pluginCore.UploadService, userID uint, sdHash string, terminatingBlobNum *int) ([]lbrystream.BlobInfo, error) {
+func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx context.Context, uploadService pluginCore.UploadService, userID uint, sdHash string, terminatingBlobNum *int, terminatingBlobIV []byte) ([]lbrystream.BlobInfo, error) {
 	pendingBlobs, err := uploadService.GetPendingBlobs(ctx, userID, sdHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending blobs for user %d and SD hash %s: %w", userID, sdHash, err)
@@ -437,8 +437,8 @@ func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx con
 		blobInfos = append(blobInfos, lbrystream.BlobInfo{
 			Length:   0,
 			BlobNum:  *terminatingBlobNum,
-			BlobHash: []byte{}, // Empty hash for terminating blob
-			IV:       []byte{}, // Empty IV for terminating blob
+			BlobHash: []byte{},          // Empty hash for terminating blob
+			IV:       terminatingBlobIV, // Use stored terminating blob IV, or empty if not set
 		})
 	}
 

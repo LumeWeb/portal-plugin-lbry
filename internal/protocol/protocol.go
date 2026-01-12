@@ -15,7 +15,6 @@ import (
 	"go.lumeweb.com/liblbry/blob/transfer/peer_transfer"
 	"go.lumeweb.com/liblbry/protocol"
 	"go.lumeweb.com/liblbry/server"
-	"go.lumeweb.com/liblbry/stream"
 	pluginCore "go.lumeweb.com/portal-plugin-lbry/core"
 	"go.lumeweb.com/portal-plugin-lbry/internal"
 	pluginConfig "go.lumeweb.com/portal-plugin-lbry/internal/config"
@@ -284,18 +283,6 @@ func (p Protocol) newReflectorAssemblyWorkflow() core.WorkflowDefinition {
 		Steps: []core.OperationStep{
 			p.newRetryStep(core.OperationName(internal.ProtocolName, REFLECTOR_ASSEMBLY_OPERATION)),
 		},
-	}
-}
-
-// applyMetadataToSDBlob applies metadata from TUS upload to an SD blob
-func applyMetadataToSDBlob(sdBlob *stream.SDBlob, metadata map[string]string) {
-	// Apply metadata from TUS upload
-	if streamName, ok := metadata["stream_name"]; ok && streamName != "" {
-		sdBlob.StreamName = streamName
-	}
-
-	if suggestedFileName, ok := metadata["suggested_file_name"]; ok && suggestedFileName != "" {
-		sdBlob.SuggestedFileName = suggestedFileName
 	}
 }
 
