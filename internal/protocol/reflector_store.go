@@ -428,8 +428,8 @@ func (rs *ReflectorStore) markBlobAsReceived(ctx context.Context, userID uint, b
 	blobInfo := &lbrystream.BlobInfo{
 		BlobHash: blobHashBytes,
 		Length:   int(blobSize),
-		BlobNum:  0,   // We don't know the blob number at this point, will be preserved if exists
-		IV:       nil, // IV data will be preserved if exists
+		BlobNum:  -1,  // Use -1 to indicate unknown blob number, will be preserved from existing records
+		IV:       nil, // IV data will be preserved from existing records
 	}
 
 	// Use upload service to mark as received with race-safe upsert

@@ -230,7 +230,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 	return db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
 		// Helper function to update existing records using the unique key (user_id, stream_id, blob_number)
 		// For StreamID=0, we use a different WHERE clause to handle blobs without stream association
-		updateExisting := func(hash string, blobNumber int, streamID uint, updates map[string]any) error {
+		updateExisting := func(hash string, blobNumber int, streamID uint, updates map[string]any) *gorm.DB {
 			var result *gorm.DB
 			if streamID == 0 {
 				// For blobs without stream association, match on user_id, blob_hash, and blob_number only
@@ -245,17 +245,19 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			}
 
 			if result.Error != nil {
-				return fmt.Errorf("failed to update pending blob: %w", result.Error)
+				_ = tx.AddError(fmt.Errorf("failed to update pending blob: %w", result.Error))
+				return tx
 			}
 			if result.RowsAffected == 0 {
-				return fmt.Errorf("no pending blob matched for update")
+				_ = tx.AddError(fmt.Errorf("no pending blob matched for update"))
+				return tx
 			}
-			return nil
+			return tx
 		}
 
 		// Helper function to create new record with fallback to update
 		// This handles race conditions where multiple requests try to create the same record
-		createWithFallback := func(pendingBlob pluginDb.PendingBlob, updates map[string]any) error {
+		createWithFallback := func(pendingBlob pluginDb.PendingBlob, updates map[string]any) *gorm.DB {
 			err := tx.Create(&pendingBlob).Error
 			if err != nil {
 				// Check if this is a duplicate key/conflict error
@@ -270,13 +272,13 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 					// For the update, always omit blob_number to avoid unique constraint violations
 					// The blob_number should only be set during initial creation, never updated afterward
 					updateOnlyFields := lo.OmitByKeys(updates, []string{"blob_number"})
-
 					return updateExisting(pendingBlob.BlobHash, pendingBlob.BlobNumber, pendingBlob.StreamID, updateOnlyFields)
 				}
 				// For all other errors, return the original error immediately
-				return err
+				_ = tx.AddError(err)
+				return tx
 			}
-			return nil
+			return tx
 		}
 
 		// For terminating blobs, update all pending terminating blobs for the user
@@ -312,7 +314,7 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 						zap.Uint("user_id", userID),
 						zap.String("terminating_hash", blobHash),
 						zap.Int("existing_count", len(existingTerminatingBlobs)))
-					return nil
+					return tx
 				}
 
 				// No terminating blobs exist at all, create a new one with stream_id=0 to avoid conflicts
@@ -333,14 +335,11 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 					"device_id": deviceID,
 				}
 
-				if err := createWithFallback(pendingBlob, updates); err != nil {
-					_ = tx.AddError(fmt.Errorf("failed to create terminating blob: %w", err))
-					return tx
-				}
-
+				resultTx := createWithFallback(pendingBlob, updates)
 				s.Logger().Debug("Created new terminating blob as received",
 					zap.Uint("user_id", userID),
 					zap.String("terminating_hash", blobHash))
+				return resultTx
 			} else {
 				s.Logger().Debug("Updated all terminating blobs as received",
 					zap.Uint("user_id", userID),
@@ -372,7 +371,8 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			updates["iv_data"] = blobInfo.IV
 		}
 
-		// Add blob_number if we have a valid one from blobInfo (allow BlobNum == 0)
+		// Add blob_number if we have a valid one from blobInfo (allow BlobNum >= 0)
+		// BlobNum == -1 indicates unknown blob number, so we preserve the existing value
 		if blobInfo.BlobNum >= 0 {
 			updates["blob_number"] = blobInfo.BlobNum
 		}
@@ -392,19 +392,13 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 
 			// Update blobs with received=false using full updates map
 			for _, existingBlob := range notReceivedBlobs {
-				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updates); err != nil {
-					_ = tx.AddError(err)
-					return tx
-				}
+				updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updates)
 			}
 
 			// Update blobs with received=true using updates map without blob_number to avoid unique constraint violations
 			updateOnlyFields := lo.OmitByKeys(updates, []string{"blob_number"})
 			for _, existingBlob := range alreadyReceivedBlobs {
-				if err := updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updateOnlyFields); err != nil {
-					_ = tx.AddError(err)
-					return tx
-				}
+				updateExisting(blobHash, existingBlob.BlobNumber, existingBlob.StreamID, updateOnlyFields)
 			}
 
 			totalUpdated := len(notReceivedBlobs) + len(alreadyReceivedBlobs)
@@ -428,14 +422,11 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 				IVData:      blobInfo.IV,
 			}
 
-			if err := createWithFallback(pendingBlob, updates); err != nil {
-				_ = tx.AddError(fmt.Errorf("failed to create pending blob: %w", err))
-				return tx
-			}
-
+			resultTx := createWithFallback(pendingBlob, updates)
 			s.Logger().Debug("Created new pending blob as received",
 				zap.Uint("user_id", userID),
 				zap.String("blob_hash", blobHash))
+			return resultTx
 		}
 
 		return tx
