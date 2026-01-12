@@ -6,10 +6,9 @@ import (
 
 type Blob struct {
 	gorm.Model
-	BlobHash    string
-	BlobSize    int
-	IVData      []byte
-	Terminating bool
+	BlobHash string
+	BlobSize int
+	IVData   []byte
 }
 
 func (Blob) TableName() string {

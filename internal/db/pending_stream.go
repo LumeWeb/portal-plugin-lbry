@@ -31,6 +31,10 @@ type PendingStream struct {
 
 	// DeviceID is the device that uploaded this stream
 	DeviceID uint
+
+	// TerminatingBlobNumber is the blob number of the terminating blob in this stream, if any
+	// NULL indicates no terminating blob
+	TerminatingBlobNumber *int
 }
 
 // TableName returns the table name for PendingStream

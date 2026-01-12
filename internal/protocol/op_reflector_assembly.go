@@ -392,15 +392,10 @@ func (h *ReflectorAssemblyOperationHandler) buildSDBlob(ctx context.Context, upl
 	}
 
 	// Get associated blobs using upload service
-	blobInfos, err := h.getBlobInfosFromPendingBlobs(ctx, uploadService, pendingStream.UserID, pendingStream.SDHash)
+	blobInfos, err := h.getBlobInfosFromPendingBlobs(ctx, uploadService, pendingStream.UserID, pendingStream.SDHash, pendingStream.TerminatingBlobNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get associated blobs for pending stream %q: %w", pendingStream.SDHash, err)
 	}
-
-	// Sort blob infos by blob number to maintain order
-	sort.Slice(blobInfos, func(i, j int) bool {
-		return blobInfos[i].BlobNum < blobInfos[j].BlobNum
-	})
 
 	sdBlob.BlobInfos = blobInfos
 
@@ -408,7 +403,7 @@ func (h *ReflectorAssemblyOperationHandler) buildSDBlob(ctx context.Context, upl
 }
 
 // getBlobInfosFromPendingBlobs retrieves blob information using upload service
-func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx context.Context, uploadService pluginCore.UploadService, userID uint, sdHash string) ([]lbrystream.BlobInfo, error) {
+func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx context.Context, uploadService pluginCore.UploadService, userID uint, sdHash string, terminatingBlobNum *int) ([]lbrystream.BlobInfo, error) {
 	pendingBlobs, err := uploadService.GetPendingBlobs(ctx, userID, sdHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get pending blobs for user %d and SD hash %s: %w", userID, sdHash, err)
@@ -416,22 +411,14 @@ func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx con
 
 	var blobInfos []lbrystream.BlobInfo
 	for _, pendingBlob := range pendingBlobs {
-		var blobHashBytes []byte
-
-		// For terminating blobs, always use empty hash in blob lists
-		if pendingBlob.Terminating {
-			blobHashBytes = []byte{} // Empty hash for terminating blobs
-		} else {
-			// Convert blob hash from hex string to bytes for non-terminating blobs
-			var err error
-			blobHashBytes, err = hex.DecodeString(pendingBlob.BlobHash)
-			if err != nil {
-				h.Logger().Warn("Failed to decode pending blob hash from hex string",
-					zap.String("blob_hash", pendingBlob.BlobHash),
-					zap.Uint("user_id", userID),
-					zap.Error(err))
-				continue
-			}
+		// Convert blob hash from hex string to bytes
+		blobHashBytes, err := hex.DecodeString(pendingBlob.BlobHash)
+		if err != nil {
+			h.Logger().Warn("Failed to decode pending blob hash from hex string",
+				zap.String("blob_hash", pendingBlob.BlobHash),
+				zap.Uint("user_id", userID),
+				zap.Error(err))
+			continue
 		}
 
 		// Create BlobInfo using the IV data from the pending blob
@@ -444,6 +431,21 @@ func (h *ReflectorAssemblyOperationHandler) getBlobInfosFromPendingBlobs(ctx con
 		}
 		blobInfos = append(blobInfos, blobInfo)
 	}
+
+	// Add virtual terminating blob if the stream has one
+	if terminatingBlobNum != nil {
+		blobInfos = append(blobInfos, lbrystream.BlobInfo{
+			Length:   0,
+			BlobNum:  *terminatingBlobNum,
+			BlobHash: []byte{}, // Empty hash for terminating blob
+			IV:       []byte{}, // Empty IV for terminating blob
+		})
+	}
+
+	// Sort blob infos by blob number to maintain correct order
+	sort.Slice(blobInfos, func(i, j int) bool {
+		return blobInfos[i].BlobNum < blobInfos[j].BlobNum
+	})
 
 	return blobInfos, nil
 }
