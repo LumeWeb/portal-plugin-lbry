@@ -179,28 +179,37 @@ func (s *UploadServiceDefault) ProcessUpload(ctx context.Context, streamResult *
 }
 
 // StorePendingBlob stores a regular blob in pending state
+// Terminating blobs are not stored in the pending_blobs table
 func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfo *stream.BlobInfo) error {
-	blobHash, isTerminating, hashErr := s.getBlobHashFromInfo(blobInfo)
-	if hashErr != nil {
-		return fmt.Errorf("failed to generate terminating blob hash: %w", hashErr)
+	// Check if this is a terminating blob (empty hash)
+	isTerminating := len(blobInfo.BlobHash) == 0
+	if isTerminating {
+		// Terminating blobs are not stored in the pending_blobs table
+		// They are tracked via terminating_blob_number on the stream
+		s.Logger().Debug("Skipping storage of terminating pending blob",
+			zap.Uint("user_id", userID),
+			zap.Uint("stream_id", streamID))
+		return nil
 	}
 
+	// Convert blob hash bytes to string
+	blobHash := hex.EncodeToString(blobInfo.BlobHash)
+
 	pendingBlob := pluginDb.PendingBlob{
-		BlobHash:    blobHash,
-		UserID:      userID,
-		DeviceID:    deviceID,
-		StreamID:    streamID,
-		BlobSize:    int(blobInfo.Length),
-		BlobNumber:  blobInfo.BlobNum,
-		Received:    true, // Mark as received when storing
-		Terminating: isTerminating,
-		IVData:      blobInfo.IV,
+		BlobHash:   blobHash,
+		UserID:     userID,
+		DeviceID:   deviceID,
+		StreamID:   streamID,
+		BlobSize:   int(blobInfo.Length),
+		BlobNumber: blobInfo.BlobNum,
+		Received:   true, // Mark as received when storing
+		IVData:     blobInfo.IV,
 	}
 
 	// Build dynamic updates and conflict columns using shared helper functions
 	received := true
-	updates := s.buildPendingBlobUpdates(deviceID, &streamID, blobInfo, &received, &isTerminating, true, true)
-	conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, &streamID)
+	updates := s.buildPendingBlobUpdates(deviceID, &streamID, blobInfo, &received, true, true)
+	conflictColumns := s.buildPendingBlobConflictColumns(&streamID)
 
 	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
 		return tx.Clauses(clause.OnConflict{
@@ -211,7 +220,6 @@ func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, dev
 		s.Logger().Error("Failed to create pending blob record",
 			zap.Uint("user_id", userID),
 			zap.String("blob_hash", blobHash),
-			zap.Bool("terminating", isTerminating),
 			zap.Error(err))
 		return fmt.Errorf("failed to create pending blob record: %w", err)
 	}
@@ -220,11 +228,19 @@ func (s *UploadServiceDefault) StorePendingBlob(ctx context.Context, userID, dev
 }
 
 // MarkPendingBlobAsReceived marks an existing pending blob as received without changing other fields
+// Terminating blobs are not stored in the pending_blobs table, so this is a no-op for them
 func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, userID, deviceID uint, blobInfo *stream.BlobInfo) error {
-	blobHash, isTerminating, hashErr := s.getBlobHashFromInfo(blobInfo)
-	if hashErr != nil {
-		return fmt.Errorf("failed to generate terminating blob hash: %w", hashErr)
+	// Check if this is a terminating blob (empty hash)
+	isTerminating := len(blobInfo.BlobHash) == 0
+	if isTerminating {
+		// Terminating blobs are not stored in the pending_blobs table
+		s.Logger().Debug("Skipping mark as received for terminating blob",
+			zap.Uint("user_id", userID))
+		return nil
 	}
+
+	// Convert blob hash bytes to string
+	blobHash := hex.EncodeToString(blobInfo.BlobHash)
 
 	// Wrap the entire operation in a database transaction with retry logic to handle lock errors
 	return db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
@@ -280,7 +296,6 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			}
 			return tx
 		}
-
 		// For terminating blobs, update all pending terminating blobs for the user
 		// since they all have the same hash and serve the same purpose
 		if isTerminating {
@@ -295,55 +310,6 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 			if result.Error != nil {
 				_ = tx.AddError(fmt.Errorf("failed to update terminating blobs: %w", result.Error))
 				return tx
-			}
-
-			// If no terminating blobs were updated, check if there are any terminating blobs at all
-			if result.RowsAffected == 0 {
-				var existingTerminatingBlobs []pluginDb.PendingBlob
-				err := tx.Where("user_id = ? AND blob_hash = ? AND terminating = ?", userID, blobHash, true).
-					Find(&existingTerminatingBlobs).Error
-
-				if err != nil {
-					_ = tx.AddError(fmt.Errorf("failed to check existing terminating blobs: %w", err))
-					return tx
-				}
-
-				// If there are existing terminating blobs, they're already marked as received, so we're done
-				if len(existingTerminatingBlobs) > 0 {
-					s.Logger().Debug("Terminating blobs already exist and are marked as received",
-						zap.Uint("user_id", userID),
-						zap.String("terminating_hash", blobHash),
-						zap.Int("existing_count", len(existingTerminatingBlobs)))
-					return tx
-				}
-
-				// No terminating blobs exist at all, create a new one with stream_id=0 to avoid conflicts
-				pendingBlob := pluginDb.PendingBlob{
-					BlobHash:    blobHash,
-					UserID:      userID,
-					DeviceID:    deviceID,
-					StreamID:    0,
-					BlobSize:    int(blobInfo.Length),
-					BlobNumber:  blobInfo.BlobNum,
-					Received:    true,
-					Terminating: true,
-					IVData:      blobInfo.IV,
-				}
-
-				updates := map[string]any{
-					"received":  true,
-					"device_id": deviceID,
-				}
-
-				resultTx := createWithFallback(pendingBlob, updates)
-				s.Logger().Debug("Created new terminating blob as received",
-					zap.Uint("user_id", userID),
-					zap.String("terminating_hash", blobHash))
-				return resultTx
-			} else {
-				s.Logger().Debug("Updated all terminating blobs as received",
-					zap.Uint("user_id", userID),
-					zap.String("terminating_hash", blobHash))
 			}
 
 			return nil
@@ -411,22 +377,26 @@ func (s *UploadServiceDefault) MarkPendingBlobAsReceived(ctx context.Context, us
 		} else {
 			// No existing records found, create a new one
 			pendingBlob := pluginDb.PendingBlob{
-				BlobHash:    blobHash,
-				UserID:      userID,
-				DeviceID:    deviceID,
-				StreamID:    0,
-				BlobSize:    int(blobInfo.Length),
-				BlobNumber:  blobInfo.BlobNum,
-				Received:    true,
-				Terminating: isTerminating,
-				IVData:      blobInfo.IV,
+				BlobHash:   blobHash,
+				UserID:     userID,
+				DeviceID:   deviceID,
+				StreamID:   0,
+				BlobSize:   int(blobInfo.Length),
+				BlobNumber: blobInfo.BlobNum,
+				Received:   true,
+				IVData:     blobInfo.IV,
 			}
 
 			resultTx := createWithFallback(pendingBlob, updates)
+			if resultTx.Error != nil {
+				_ = tx.AddError(fmt.Errorf("failed to create new pending blob: %w", resultTx.Error))
+				return tx
+			}
+
 			s.Logger().Debug("Created new pending blob as received",
 				zap.Uint("user_id", userID),
 				zap.String("blob_hash", blobHash))
-			return resultTx
+			return tx
 		}
 
 		return tx
@@ -483,8 +453,9 @@ func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, d
 	}
 
 	// Auto-create empty pending records for all child blobs referenced in the SD blob
+	var terminatingBlobNum *int
 	if len(sdBlob.BlobInfos) > 0 {
-		err = s.createPendingBlobsFromSDBlob(ctx, userID, deviceID, pendingStream.ID, sdBlob.BlobInfos)
+		err = s.createPendingBlobsFromSDBlob(ctx, userID, deviceID, pendingStream.ID, sdBlob.BlobInfos, terminatingBlobNum)
 		if err != nil {
 			s.Logger().Error("Failed to create pending blob records from SD blob",
 				zap.Uint("user_id", userID),
@@ -501,6 +472,21 @@ func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, d
 		s.Logger().Debug("SD blob stored successfully (no child blobs)",
 			zap.Uint("user_id", userID),
 			zap.String("sd_hash", sdHash))
+	}
+
+	// Update pending stream with terminating blob number if found
+	if terminatingBlobNum != nil {
+		err = s.DB().WithContext(ctx).Model(&pluginDb.PendingStream{}).
+			Where("id = ?", pendingStream.ID).
+			Update("terminating_blob_number", *terminatingBlobNum).Error
+		if err != nil {
+			s.Logger().Error("Failed to update pending stream with terminating blob number",
+				zap.Uint("user_id", userID),
+				zap.String("sd_hash", sdHash),
+				zap.Int("terminating_blob_number", *terminatingBlobNum),
+				zap.Error(err))
+			return 0, fmt.Errorf("failed to update pending stream with terminating blob number: %w", err)
+		}
 	}
 
 	return pendingStream.ID, nil
@@ -525,23 +511,13 @@ func (s *UploadServiceDefault) getBlobHashFromInfo(blobInfo *stream.BlobInfo) (s
 	}
 }
 
-// buildPendingBlobConflictColumns builds the appropriate conflict columns based on blob type
-func (s *UploadServiceDefault) buildPendingBlobConflictColumns(isTerminating bool, streamID *uint) []clause.Column {
-	if isTerminating && streamID != nil && *streamID > 0 {
-		// For terminating blobs with valid stream_id, use composite key (user_id, stream_id, blob_number)
-		return []clause.Column{
-			{Name: "user_id"},
-			{Name: "stream_id"},
-			{Name: "blob_number"},
-		}
-	} else {
-		// For regular blobs or terminating blobs without stream_id, use (user_id, blob_hash) constraint
-		return []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}}
-	}
+// buildPendingBlobConflictColumns builds the appropriate conflict columns for pending blob operations
+func (s *UploadServiceDefault) buildPendingBlobConflictColumns(streamID *uint) []clause.Column {
+	return []clause.Column{{Name: "user_id"}, {Name: "blob_hash"}}
 }
 
 // buildPendingBlobUpdates builds dynamic DoUpdates clause for pending blob operations
-func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *uint, blobInfo *stream.BlobInfo, received *bool, terminating *bool, updateBlobNum, updateSize bool) []clause.Assignment {
+func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *uint, blobInfo *stream.BlobInfo, received *bool, updateBlobNum, updateSize bool) []clause.Assignment {
 	var updates []clause.Assignment
 
 	// Always update device_id
@@ -555,11 +531,6 @@ func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *
 	// Update received status only if explicitly provided
 	if received != nil {
 		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "received"}, Value: *received})
-	}
-
-	// Update terminating status only if explicitly provided
-	if terminating != nil {
-		updates = append(updates, clause.Assignment{Column: clause.Column{Name: "terminating"}, Value: *terminating})
 	}
 
 	// Update blob_size only if requested
@@ -581,7 +552,8 @@ func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *
 }
 
 // createPendingBlobsFromSDBlob creates pending blob records from SD blob child blob information
-func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfos []stream.BlobInfo) error {
+// Terminating blobs are skipped and their blob number is returned in terminatingBlobNum
+func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfos []stream.BlobInfo, terminatingBlobNum *int) error {
 	return db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
 		for _, blobInfo := range blobInfos {
 			blobHash, isTerminating, hashErr := s.getBlobHashFromInfo(&blobInfo)
@@ -590,22 +562,31 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 				return tx
 			}
 
+			// Skip creating pending blob records for terminating blobs
+			// Instead, track the terminating blob number
+			if isTerminating {
+				if terminatingBlobNum == nil {
+					terminatingBlobNum = new(int)
+				}
+				*terminatingBlobNum = blobInfo.BlobNum
+				continue
+			}
+
 			// Create pending blob record with Received=false to indicate it's waiting for upload
 			pendingBlob := pluginDb.PendingBlob{
-				BlobHash:    blobHash,
-				UserID:      userID,
-				DeviceID:    deviceID,
-				StreamID:    streamID,
-				BlobSize:    blobInfo.Length,
-				BlobNumber:  blobInfo.BlobNum,
-				Received:    false, // Mark as not received yet - waiting for upload
-				Terminating: isTerminating,
-				IVData:      blobInfo.IV,
+				BlobHash:   blobHash,
+				UserID:     userID,
+				DeviceID:   deviceID,
+				StreamID:   streamID,
+				BlobSize:   blobInfo.Length,
+				BlobNumber: blobInfo.BlobNum,
+				Received:   false, // Mark as not received yet - waiting for upload
+				IVData:     blobInfo.IV,
 			}
 
 			// Build dynamic updates and conflict columns using shared helper functions
-			updates := s.buildPendingBlobUpdates(deviceID, &streamID, &blobInfo, nil, &isTerminating, true, true)
-			conflictColumns := s.buildPendingBlobConflictColumns(isTerminating, &streamID)
+			updates := s.buildPendingBlobUpdates(deviceID, &streamID, &blobInfo, nil, true, true)
+			conflictColumns := s.buildPendingBlobConflictColumns(&streamID)
 
 			err := tx.Clauses(clause.OnConflict{
 				Columns:   conflictColumns,
@@ -613,7 +594,7 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 			}).Create(&pendingBlob).Error
 
 			if err != nil {
-				_ = tx.AddError(fmt.Errorf("failed to create pending blob record for %s (terminating: %v): %w", blobHash, isTerminating, err))
+				_ = tx.AddError(fmt.Errorf("failed to create pending blob record for %s: %w", blobHash, err))
 				return tx
 			}
 		}
@@ -702,15 +683,23 @@ func (s *UploadServiceDefault) CleanupPendingBlobs(ctx context.Context, userID u
 					contentBlobHashes[i] = hex.EncodeToString(contentBlob)
 				}
 
-				return tx.Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, pendingStream.ID, contentBlobHashes).
-					Delete(&pluginDb.PendingBlob{})
+				if err := tx.Where("user_id = ? AND stream_id = ? AND blob_hash IN ?", userID, pendingStream.ID, contentBlobHashes).
+					Delete(&pluginDb.PendingBlob{}).Error; err != nil {
+					_ = tx.AddError(fmt.Errorf("failed to delete pending blobs: %w", err))
+					return tx
+				}
 			}
 		}
 
 		// Clean up pending stream (SD blob) by SD hash
 		// This will succeed even if no record exists (no-op)
-		return tx.Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
-			Delete(&pluginDb.PendingStream{})
+		if err := tx.Where("user_id = ? AND sd_hash = ?", userID, streamResult.SDBlobHash).
+			Delete(&pluginDb.PendingStream{}).Error; err != nil {
+			_ = tx.AddError(fmt.Errorf("failed to delete pending stream: %w", err))
+			return tx
+		}
+
+		return tx
 	})
 }
 
@@ -734,9 +723,9 @@ func isDuplicateKeyError(err error) bool {
 
 // ensureActivePin finds an existing pin (including soft-deleted) and ensures it's active
 // Returns the pin if found/restored, or gorm.ErrRecordNotFound if not found
-func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, streamID uint, sdHash string) (*pluginDb.StreamPin, error) {
+func (s *UploadServiceDefault) ensureActivePin(ctx context.Context, userId, streamID uint, sdHash string, tx *gorm.DB) (*pluginDb.StreamPin, error) {
 	var pin pluginDb.StreamPin
-	if err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+	if err := db.RetryableTransaction(ctx, tx, func(tx *gorm.DB) *gorm.DB {
 		if err := tx.Unscoped().
 			Where("user_id = ? AND stream_id = ?", userId, streamID).
 			First(&pin).Error; err != nil {
@@ -799,7 +788,7 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 		}
 
 		// Try to find and ensure an existing pin is active
-		existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
+		existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash, tx)
 		if err == nil {
 			streamPin = existingPin
 			return tx
@@ -825,7 +814,7 @@ func (s *UploadServiceDefault) CreateStreamPin(ctx context.Context, userId uint,
 					zap.String("sdHash", sdHash))
 
 				// Use the helper to find and ensure the pin is active
-				existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash)
+				existingPin, err := s.ensureActivePin(ctx, userId, _stream.ID, sdHash, tx)
 				if err != nil {
 					_ = tx.AddError(fmt.Errorf("failed to fetch existing stream pin after duplicate constraint: %w", err))
 					return tx

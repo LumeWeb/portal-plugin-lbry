@@ -28,9 +28,6 @@ type PendingBlob struct {
 	// Received indicates whether the blob data has been received (true) or is still waiting (false)
 	Received bool
 
-	// Terminating indicates whether this blob is a terminating blob (last blob in stream)
-	Terminating bool
-
 	// IV is the initialization vector for the blob
 	IVData []byte
 }

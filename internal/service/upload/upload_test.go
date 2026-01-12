@@ -40,14 +40,14 @@ const (
 )
 
 // Helper functions for common mock patterns
-func getStorageAndPinAndUploadMocks(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
-	mockStorage := core.GetService[*coreMocks.MockStorageService](ctx, core.STORAGE_SERVICE)
+func getStorageAndPinAndUploadMocks(ctx coreTesting.TestContext) (*coreTesting.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
+	mockStorage := core.GetService[*coreTesting.MockStorageService](ctx, core.STORAGE_SERVICE)
 	mockPin := core.GetService[*coreMocks.MockPinService](ctx, core.PIN_SERVICE)
 	mockUpload := core.GetService[*coreMocks.MockUploadService](ctx, core.UPLOAD_SERVICE)
 	return mockStorage, mockPin, mockUpload
 }
 
-func setupStorageMock(storage *coreMocks.MockStorageService, expectedUploadID string, expectedError error) {
+func setupStorageMock(storage *coreTesting.MockStorageService, expectedUploadID string, expectedError error) {
 	storage.EXPECT().S3TemporaryUpload(mock.Anything, mock.Anything, mock.AnythingOfType("uint64"), mock.Anything).Return(expectedUploadID, expectedError).Once()
 }
 
@@ -100,13 +100,13 @@ func TestUploadServiceDefault_HandleUpload(t *testing.T) {
 		name          string
 		testData      []byte
 		expectedError bool
-		setupMocks    func(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService)
+		setupMocks    func(ctx coreTesting.TestContext) (*coreTesting.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService)
 	}{
 		{
 			name:          "successful upload",
 			testData:      []byte("test data for lbry upload"),
 			expectedError: false,
-			setupMocks: func(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
+			setupMocks: func(ctx coreTesting.TestContext) (*coreTesting.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
 				mockStorage, mockPin, mockUpload := getStorageAndPinAndUploadMocks(ctx)
 
 				// Mock successful storage upload
@@ -119,7 +119,7 @@ func TestUploadServiceDefault_HandleUpload(t *testing.T) {
 			name:          "storage service error",
 			testData:      []byte("test data for lbry upload"),
 			expectedError: true,
-			setupMocks: func(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
+			setupMocks: func(ctx coreTesting.TestContext) (*coreTesting.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
 				mockStorage, mockPin, mockUpload := getStorageAndPinAndUploadMocks(ctx)
 
 				// Mock storage upload error
@@ -132,7 +132,7 @@ func TestUploadServiceDefault_HandleUpload(t *testing.T) {
 			name:          "empty data upload",
 			testData:      []byte(""),
 			expectedError: false,
-			setupMocks: func(ctx coreTesting.TestContext) (*coreMocks.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
+			setupMocks: func(ctx coreTesting.TestContext) (*coreTesting.MockStorageService, *coreMocks.MockPinService, *coreMocks.MockUploadService) {
 				mockStorage, mockPin, mockUpload := getStorageAndPinAndUploadMocks(ctx)
 
 				// Mock successful storage upload for empty data
@@ -1609,10 +1609,9 @@ func createTestStreamBlob(ctx coreTesting.TestContext, streamID uint64, blobID u
 
 func createTestBlob(ctx coreTesting.TestContext, blobHash string, blobSize int, iv []byte) *pluginDb.Blob {
 	blob := &pluginDb.Blob{
-		BlobHash:    blobHash,
-		BlobSize:    blobSize,
-		IVData:      iv,
-		Terminating: false,
+		BlobHash: blobHash,
+		BlobSize: blobSize,
+		IVData:   iv,
 	}
 	err := ctx.DB().Create(blob).Error
 	if err != nil {
@@ -1916,15 +1915,16 @@ func TestUploadServiceDefault_MarkPendingBlobAsReceived(t *testing.T) {
 				} else {
 					assert.NoError(tb, err)
 
-					// Verify the pending blob was marked as received correctly
-					var updatedPendingBlob pluginDb.PendingBlob
 					blobHash := hex.EncodeToString(tt.blobInfo.BlobHash)
 					if blobHash == "" {
-						// For terminating blobs, we need to find the generated hash
-						err = ctx.DB().Where("user_id = ? AND terminating = ? AND received = ?", tt.userID, true, true).First(&updatedPendingBlob).Error
-					} else {
-						err = ctx.DB().Where("user_id = ? AND blob_hash = ?", tt.userID, blobHash).First(&updatedPendingBlob).Error
+						// Terminating blobs are not stored in pending_blobs table
+						// They are tracked via terminating_blob_number on the stream instead
+						return
 					}
+
+					// Verify the pending blob was marked as received correctly
+					var updatedPendingBlob pluginDb.PendingBlob
+					err = ctx.DB().Where("user_id = ? AND blob_hash = ?", tt.userID, blobHash).First(&updatedPendingBlob).Error
 					assert.NoError(tb, err)
 					assert.Equal(tb, tt.userID, updatedPendingBlob.UserID)
 					assert.Equal(tb, tt.deviceID, updatedPendingBlob.DeviceID)
@@ -1942,12 +1942,6 @@ func TestUploadServiceDefault_MarkPendingBlobAsReceived(t *testing.T) {
 					// For IV data, if blobInfo.IV is provided, use it; otherwise preserve existing IV data
 					if tt.blobInfo.IV != nil {
 						assert.Equal(tb, tt.blobInfo.IV, updatedPendingBlob.IVData)
-					}
-					// When blobInfo.IV is nil, existing IV data should be preserved
-
-					// For terminating blobs, check that terminating flag is set
-					if len(tt.blobInfo.BlobHash) == 0 {
-						assert.True(tb, updatedPendingBlob.Terminating)
 					}
 
 					// Critical test: verify stream_id is preserved for existing blobs
