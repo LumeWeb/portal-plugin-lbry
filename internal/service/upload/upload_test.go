@@ -1856,6 +1856,27 @@ func TestUploadServiceDefault_MarkPendingBlobAsReceived(t *testing.T) {
 			expectError: false,
 			description: "should create new pending blob marked as received",
 		},
+		{
+			name:     "mark multiple blobs in same stream with unknown blob number (BlobNum=-1)",
+			userID:   1,
+			deviceID: 2,
+			blobInfo: &stream.BlobInfo{
+				BlobHash: []byte(testUploadHash3),
+				Length:   1024,
+				BlobNum:  -1, // -1 indicates unknown blob number, preserves existing blob_number
+				IV:       nil,
+			},
+			setupData: func(ctx coreTesting.TestContext) (uint, error) {
+				// Create a pending stream first
+				pendingStream := createTestPendingStream(ctx, 1, 1, testUploadHash1, "test_sd_hash", "test_stream", "lbryfile", "test_file.txt", []byte("test_key"))
+				// Create multiple pending blobs in the same stream with different blob numbers
+				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, hex.EncodeToString([]byte(testUploadHash3)), 1024, 1, false, []byte("test_iv"))
+				createTestPendingBlob(ctx, 1, 1, pendingStream.ID, hex.EncodeToString([]byte(testUploadHash4)), 2048, 2, false, []byte("test_iv2"))
+				return pendingStream.ID, nil
+			},
+			expectError: false,
+			description: "should mark blobs as received without updating blob_number when BlobNum is -1 (unknown)",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1908,9 +1929,21 @@ func TestUploadServiceDefault_MarkPendingBlobAsReceived(t *testing.T) {
 					assert.Equal(tb, tt.userID, updatedPendingBlob.UserID)
 					assert.Equal(tb, tt.deviceID, updatedPendingBlob.DeviceID)
 					assert.Equal(tb, int(tt.blobInfo.Length), updatedPendingBlob.BlobSize)
-					assert.Equal(tb, tt.blobInfo.BlobNum, updatedPendingBlob.BlobNumber)
+
+					// For unknown blob number (-1), verify the original blob_number is preserved
+					if tt.blobInfo.BlobNum == -1 {
+						assert.NotEqual(tb, -1, updatedPendingBlob.BlobNumber, "blob_number should be preserved when BlobNum is -1 (unknown)")
+					} else {
+						assert.Equal(tb, tt.blobInfo.BlobNum, updatedPendingBlob.BlobNumber)
+					}
+
 					assert.True(tb, updatedPendingBlob.Received)
-					assert.Equal(tb, tt.blobInfo.IV, updatedPendingBlob.IVData)
+
+					// For IV data, if blobInfo.IV is provided, use it; otherwise preserve existing IV data
+					if tt.blobInfo.IV != nil {
+						assert.Equal(tb, tt.blobInfo.IV, updatedPendingBlob.IVData)
+					}
+					// When blobInfo.IV is nil, existing IV data should be preserved
 
 					// For terminating blobs, check that terminating flag is set
 					if len(tt.blobInfo.BlobHash) == 0 {
