@@ -2,8 +2,14 @@
 -- Add terminating_blob_number to streams table
 ALTER TABLE lbry_streams ADD COLUMN terminating_blob_number INT DEFAULT NULL;
 
--- Add terminating_blob_number to pending_streams table  
+-- Add terminating_blob_number to pending_streams table
 ALTER TABLE lbry_pending_streams ADD COLUMN terminating_blob_number INT DEFAULT NULL;
+
+-- Add terminating_blob_iv to streams table
+ALTER TABLE lbry_streams ADD COLUMN terminating_blob_iv BLOB DEFAULT NULL;
+
+-- Add terminating_blob_iv to pending_streams table
+ALTER TABLE lbry_pending_streams ADD COLUMN terminating_blob_iv BLOB DEFAULT NULL;
 
 -- Drop terminating column from blobs table
 ALTER TABLE lbry_blobs DROP COLUMN terminating;
@@ -29,3 +35,9 @@ ALTER TABLE lbry_streams DROP COLUMN terminating_blob_number;
 
 -- Drop terminating_blob_number from pending_streams table
 ALTER TABLE lbry_pending_streams DROP COLUMN terminating_blob_number;
+
+-- Drop terminating_blob_iv from streams table
+ALTER TABLE lbry_streams DROP COLUMN terminating_blob_iv;
+
+-- Drop terminating_blob_iv from pending_streams table
+ALTER TABLE lbry_pending_streams DROP COLUMN terminating_blob_iv;

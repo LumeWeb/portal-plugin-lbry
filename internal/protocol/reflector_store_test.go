@@ -1,12 +1,11 @@
 package protocol
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
-	"io"
 	"testing"
 
+	"go.lumeweb.com/portal-plugin-lbry/internal"
 	"go.lumeweb.com/portal/db/models"
 
 	"github.com/stretchr/testify/assert"
@@ -295,7 +294,7 @@ func TestReflectorStore_Get(t *testing.T) {
 
 		// Set up mock expectations
 		mockStorage.EXPECT().S3GetTemporaryUpload(mock.Anything, mock.Anything, "456/test_hash_456").
-			Return(io.NopCloser(bytes.NewReader(testData)), nil).Once()
+			Return(internal.NewReadSeekCloser(testData), nil).Once()
 
 		testDevice := &pluginDb.Device{
 			Model: gorm.Model{

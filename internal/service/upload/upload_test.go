@@ -2045,6 +2045,35 @@ func TestUploadServiceDefault_StorePendingStream(t *testing.T) {
 			description: "should handle minimal stream data gracefully",
 		},
 		{
+			name:     "store pending stream with terminating blob with IV",
+			userID:   1,
+			deviceID: 1,
+			sdBlob: &stream.SDBlob{
+				StreamHash:        []byte(testUploadHash1),
+				StreamName:        "test_stream_terminating",
+				StreamType:        "video",
+				SuggestedFileName: "test_terminating.mp4",
+				Key:               []byte("test_key"),
+				BlobInfos: []stream.BlobInfo{
+					{
+						BlobHash: []byte(testUploadHash3),
+						Length:   1024,
+						BlobNum:  1,
+						IV:       []byte("iv1"),
+					},
+					{
+						BlobHash: []byte{}, // Empty hash indicates terminating blob
+						Length:   0,
+						BlobNum:  2,                        // Terminating blob number
+						IV:       []byte("terminating_iv"), // IV for terminating blob
+					},
+				},
+			},
+			sdHash:      testUploadHash2,
+			expectError: false,
+			description: "should successfully store pending stream with terminating blob and IV",
+		},
+		{
 			name:        "error with nil sdBlob",
 			userID:      1,
 			deviceID:    1,
@@ -2094,20 +2123,26 @@ func TestUploadServiceDefault_StorePendingStream(t *testing.T) {
 
 					// Verify child pending blobs were created if SD blob has BlobInfos
 					if len(tt.sdBlob.BlobInfos) > 0 {
-						// Get the expected blob hashes from SD blob
-						expectedBlobHashes := make([]string, len(tt.sdBlob.BlobInfos))
-						for i, blobInfo := range tt.sdBlob.BlobInfos {
-							expectedBlobHashes[i] = hex.EncodeToString(blobInfo.BlobHash)
+						// Get the expected blob hashes from SD blob (excluding terminating blobs with empty hash)
+						var expectedBlobHashes []string
+						for _, blobInfo := range tt.sdBlob.BlobInfos {
+							if len(blobInfo.BlobHash) > 0 {
+								expectedBlobHashes = append(expectedBlobHashes, hex.EncodeToString(blobInfo.BlobHash))
+							}
 						}
 
 						var pendingBlobs []pluginDb.PendingBlob
 						// Query pending blobs by user ID and blob hashes (IN clause)
 						err = ctx.DB().Where("user_id = ? AND blob_hash IN ?", tt.userID, expectedBlobHashes).Find(&pendingBlobs).Error
 						assert.NoError(tb, err)
-						assert.Len(tb, pendingBlobs, len(tt.sdBlob.BlobInfos))
+						assert.Len(tb, pendingBlobs, len(expectedBlobHashes))
 
 						// Verify each child pending blob
 						for _, expectedBlob := range tt.sdBlob.BlobInfos {
+							// Skip terminating blobs (empty hash) - they are not stored in pending_blobs table
+							if len(expectedBlob.BlobHash) == 0 {
+								continue
+							}
 							found := false
 							for _, actualBlob := range pendingBlobs {
 								if actualBlob.BlobHash == hex.EncodeToString(expectedBlob.BlobHash) {

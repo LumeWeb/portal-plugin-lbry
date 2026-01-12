@@ -2,8 +2,14 @@
 -- Add terminating_blob_number to streams table
 ALTER TABLE lbry_streams ADD COLUMN terminating_blob_number INTEGER DEFAULT NULL;
 
--- Add terminating_blob_number to pending_streams table  
+-- Add terminating_blob_number to pending_streams table
 ALTER TABLE lbry_pending_streams ADD COLUMN terminating_blob_number INTEGER DEFAULT NULL;
+
+-- Add terminating_blob_iv to streams table
+ALTER TABLE lbry_streams ADD COLUMN terminating_blob_iv BLOB DEFAULT NULL;
+
+-- Add terminating_blob_iv to pending_streams table
+ALTER TABLE lbry_pending_streams ADD COLUMN terminating_blob_iv BLOB DEFAULT NULL;
 
 -- Recreate blobs table without terminating column
 CREATE TABLE lbry_blobs_new (
@@ -153,7 +159,7 @@ CREATE INDEX idx_pending_blobs_user_id ON lbry_pending_blobs(user_id);
 CREATE INDEX idx_pending_blobs_device_id ON lbry_pending_blobs(device_id);
 CREATE INDEX idx_pending_blobs_stream_id ON lbry_pending_blobs(stream_id);
 
--- Recreate streams table without terminating_blob_number
+-- Recreate streams table without terminating_blob_number and terminating_blob_iv
 CREATE TABLE lbry_streams_new (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     stream_hash TEXT NOT NULL UNIQUE,

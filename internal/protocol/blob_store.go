@@ -78,7 +78,29 @@ func (bs *BlobStore) validateBlob(blob pluginDb.Blob) bool {
 	// Non-terminating blobs with data must have both hash and IV
 	hasData := blob.BlobSize > 0
 	hasMissingMetadata := len(blob.BlobHash) == 0 || len(blob.IVData) == 0
-	return !(hasData && hasMissingMetadata)
+
+	// Skip blobs that have data but are missing metadata
+	if hasData && hasMissingMetadata {
+		return false
+	}
+
+	// Skip zero-size blobs (non-terminating blobs should have data)
+	// Terminating blobs are handled separately in buildBlobInfosFromDb
+	if blob.BlobSize == 0 {
+		return false
+	}
+
+	// Skip blobs with empty hash (invalid)
+	if len(blob.BlobHash) == 0 {
+		return false
+	}
+
+	// Skip blobs with empty IV (invalid for non-terminating blobs)
+	if len(blob.IVData) == 0 {
+		return false
+	}
+
+	return true
 }
 
 // BlobStore implements the storage.BlobStore interface for LBRY protocol
@@ -314,19 +336,22 @@ func (bs *BlobStore) Put(ctx context.Context, hash string, data []byte) error {
 }
 
 // processStreamBlobs handles the creation/update of stream blob associations
-// Terminating blobs are tracked via terminating_blob_number on the stream instead of as blob records
+// Terminating blobs are tracked via terminating_blob_number and terminating_blob_iv on the stream instead of as blob records
 func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blobInfos []stream.BlobInfo) error {
 	return bs.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var terminatingBlobNum *int
+		var terminatingBlobIV []byte
 
 		// Process each blob in the stream
 		for _, blobInfo := range blobInfos {
-			// Skip terminating blobs - they will be tracked via terminating_blob_number
+			// Skip terminating blobs - they will be tracked via terminating_blob_number and terminating_blob_iv
 			if len(blobInfo.BlobHash) == 0 {
 				if terminatingBlobNum == nil {
 					terminatingBlobNum = new(int)
 				}
 				*terminatingBlobNum = blobInfo.BlobNum
+				// Store the IV for the terminating blob
+				terminatingBlobIV = blobInfo.IV
 				continue
 			}
 
@@ -370,13 +395,19 @@ func (bs *BlobStore) processStreamBlobs(ctx context.Context, streamID uint, blob
 			}
 		}
 
-		// Update the stream with terminating blob number if found
+		// Update the stream with terminating blob number and IV if found
 		if terminatingBlobNum != nil {
+			updates := map[string]any{
+				"terminating_blob_number": *terminatingBlobNum,
+			}
+			if len(terminatingBlobIV) > 0 {
+				updates["terminating_blob_iv"] = terminatingBlobIV
+			}
 			err := tx.Model(&pluginDb.Stream{}).
 				Where("id = ?", streamID).
-				Update("terminating_blob_number", *terminatingBlobNum).Error
+				Updates(updates).Error
 			if err != nil {
-				return fmt.Errorf("failed to update stream with terminating blob number: %w", err)
+				return fmt.Errorf("failed to update stream with terminating blob info: %w", err)
 			}
 		}
 
@@ -457,11 +488,15 @@ func (bs *BlobStore) buildBlobInfosFromDb(ctx context.Context, streamID uint) ([
 
 	// Add virtual terminating blob if the stream has one
 	if _stream.TerminatingBlobNumber != nil {
+		terminatingIV := []byte{}
+		if _stream.TerminatingBlobIV != nil {
+			terminatingIV = _stream.TerminatingBlobIV
+		}
 		blobInfos = append(blobInfos, stream.BlobInfo{
 			Length:   0,
 			BlobNum:  *_stream.TerminatingBlobNumber,
-			BlobHash: []byte{}, // Empty hash for terminating blob
-			IV:       []byte{}, // Empty IV for terminating blob
+			BlobHash: []byte{},      // Empty hash for terminating blob
+			IV:       terminatingIV, // Use stored terminating blob IV, or empty if not set
 		})
 	}
 

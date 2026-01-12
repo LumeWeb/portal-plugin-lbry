@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,7 +33,8 @@ func TestRetrieveOperationHandler_Execute_Integration(t *testing.T) {
 		userSvc := core.GetService[core.UserService](ctx, core.USER_SERVICE)
 		require.NotNil(tb, userSvc, "User service should be available")
 
-		testUser, err := userSvc.CreateAccount(TestUserEmail, TestUserPassword, false)
+		reqCtx := context.Background()
+		testUser, err := userSvc.CreateAccount(reqCtx, TestUserEmail, TestUserPassword, false)
 		require.NoError(tb, err)
 
 		// Get the operation name

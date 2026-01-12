@@ -25,7 +25,8 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 
 		// Create a test user account
 		userSvc := core.GetService[core.UserService](ctx, core.USER_SERVICE)
-		testUser, err := userSvc.CreateAccount(TestUserEmail, TestUserPassword, false)
+		reqCtx := context.Background()
+		testUser, err := userSvc.CreateAccount(reqCtx, TestUserEmail, TestUserPassword, false)
 		require.NoError(tb, err)
 
 		// Get the upload service
@@ -33,7 +34,6 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 		require.NotNil(tb, uploadService)
 
 		// Create a temporary upload using the upload service
-		reqCtx := context.Background()
 		uploadCID, uploadID, err := uploadService.HandleUpload(reqCtx, internal.NewReadSeekCloser(testData))
 		require.NoError(tb, err)
 		require.NotEmpty(tb, uploadID)
