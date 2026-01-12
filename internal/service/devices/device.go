@@ -24,7 +24,7 @@ type DeviceServiceDefault struct {
 func NewDeviceService() (core.Service, []core.ContextBuilderOption, error) {
 	service := &DeviceServiceDefault{}
 
-	return service, nil, nil
+	return service, []core.ContextBuilderOption{}, nil
 }
 
 // Name returns the service name
@@ -246,9 +246,6 @@ func (s *DeviceServiceDefault) DeleteDevice(ctx context.Context, userID, id uint
 		// Delete device (soft delete)
 		return tx.Delete(&device)
 	}); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
 		return err
 	}
 
