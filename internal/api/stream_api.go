@@ -154,7 +154,9 @@ func (a *API) handleStreamUpload(c echo.Context) error {
 	// Initiate upload workflow for post-processing
 	// Start a background workflow to handle post-upload processing
 	// This includes tasks like metadata extraction, indexing, and notifications
-	_, err = a.workflowService.StartWorkflow(reqCtx, protocol.UPLOAD_WORKFLOW,
+	// Use detached context to preserve OpenTelemetry tracing while avoiding request context cancellation
+	workflowCtx := core.DetachContext(reqCtx)
+	_, err = a.workflowService.StartWorkflow(workflowCtx, protocol.UPLOAD_WORKFLOW,
 		// Pass the upload ID and metadata as workflow data for tracking
 		core.WithWorkflowStructData(&protocol.PostUploadWorkflowData{
 			UploadID: uploadID,

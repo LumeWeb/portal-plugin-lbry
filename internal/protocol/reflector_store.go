@@ -38,7 +38,7 @@ func (rs *ReflectorStore) PutSD(ctx context.Context, hash string, data []byte) e
 	}
 
 	// Validate SD blob using the dedicated validation function
-	if err := lbrystream.ValidateSDBlob(data); err != nil {
+	if err := lbrystream.ValidateSDBlobBytes(data); err != nil {
 		return fmt.Errorf("invalid SD blob %q: %w", hash, err)
 	}
 
@@ -103,7 +103,10 @@ func (rs *ReflectorStore) PutSD(ctx context.Context, hash string, data []byte) e
 		workflowOptions = append(workflowOptions, core.WithWorkflowStorageHash(storageHash))
 	}
 
-	_, err = rs.workflowSvc.StartWorkflow(ctx, REFLECTOR_ASSEMBLY_WORKFLOW, workflowOptions...)
+	// Start reflector assembly workflow for background processing
+	// Use detached context to preserve OpenTelemetry tracing while avoiding connection timeout cancellation
+	workflowCtx := core.DetachContext(ctx)
+	_, err = rs.workflowSvc.StartWorkflow(workflowCtx, REFLECTOR_ASSEMBLY_WORKFLOW, workflowOptions...)
 	if err != nil {
 		rs.logger.Error("Failed to start reflector assembly workflow",
 			zap.String("sd_hash", hash),

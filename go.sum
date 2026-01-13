@@ -754,8 +754,12 @@ go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639 h1:qOpSIFc0o2GCY1fS5N
 go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639/go.mod h1:9nE2dYybu+bfxSvufJyvCPU27U8uR2/5euxBhCrK6pI=
 go.lumeweb.com/liblbry v0.0.0-20260112210150-1fc726d3bbf4 h1:uV6l0B6v1zSqhoSo74SnKb1WEgJMNEDp0Uw8edIIniU=
 go.lumeweb.com/liblbry v0.0.0-20260112210150-1fc726d3bbf4/go.mod h1:jaxLOGeIjAvzsHuSycTrg8h4lmGZt6WHNq/AnAyvNj0=
+go.lumeweb.com/liblbry v0.0.0-20260113003237-4afbcef02948 h1:qtLolIkP3gKKrQ1WhDIB6DgiI1HBoZKLU6IqCvTHbyo=
+go.lumeweb.com/liblbry v0.0.0-20260113003237-4afbcef02948/go.mod h1:jaxLOGeIjAvzsHuSycTrg8h4lmGZt6WHNq/AnAyvNj0=
 go.lumeweb.com/portal v0.4.2-0.20260111110042-8a268cb0f658 h1:aWMLXp63c1gJQHhUfre/Ua5cY9KGf10KfVPksWPt0J4=
 go.lumeweb.com/portal v0.4.2-0.20260111110042-8a268cb0f658/go.mod h1:wMRDp+h32JNjzzJ8yfHHNVOesM6F82hy1OxK/sOWlKI=
+go.lumeweb.com/portal v0.4.2-0.20260112233217-068e099bf524 h1:04tF7sxo3vls6zfZftGQP0369eb865awSoLjOatKxQs=
+go.lumeweb.com/portal v0.4.2-0.20260112233217-068e099bf524/go.mod h1:wMRDp+h32JNjzzJ8yfHHNVOesM6F82hy1OxK/sOWlKI=
 go.lumeweb.com/portal-middleware v0.3.4 h1:A9/Ipo3giX449CCgbKGco97IqDxFG7Z1ppmM1IQBeDQ=
 go.lumeweb.com/portal-middleware v0.3.4/go.mod h1:3dHvOYXApc1b673I1UAoYBpyXg2c7ku4HqxXvef8dj8=
 go.lumeweb.com/portal-router v0.6.11 h1:0PTej57mtNcRpKZNukD0j0ZYp5ntbR7fl5g6DO+0mvk=
