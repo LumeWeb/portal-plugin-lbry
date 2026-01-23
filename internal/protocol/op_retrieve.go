@@ -56,7 +56,9 @@ func (h *RetrieveOperationHandler) Execute(ctx context.Context, req *models.Requ
 	// Log successful acquisition for debugging
 	h.Logger().Debug("Successfully acquired SD blob",
 		zap.String("lbry_hash", lbryHash),
-		zap.Any("blob", blob))
+		zap.String("sd_blob_hash", blob.SDBlobHash),
+		zap.String("stream_hash", blob.StreamHash),
+		zap.Int("total_chunks", blob.TotalChunks))
 
 	h.Logger().Debug("Created stream result from SD blob",
 		zap.String("sd_hash", lbryHash),
