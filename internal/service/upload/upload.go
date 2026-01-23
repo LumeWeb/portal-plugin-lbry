@@ -456,7 +456,7 @@ func (s *UploadServiceDefault) StorePendingStream(ctx context.Context, userID, d
 	var terminatingBlobNum *int
 	var terminatingBlobIV []byte
 	if len(sdBlob.BlobInfos) > 0 {
-		err = s.createPendingBlobsFromSDBlob(ctx, userID, deviceID, pendingStream.ID, sdBlob.BlobInfos, terminatingBlobNum, &terminatingBlobIV)
+		terminatingBlobNum, terminatingBlobIV, err = s.createPendingBlobsFromSDBlob(ctx, userID, deviceID, pendingStream.ID, sdBlob.BlobInfos)
 		if err != nil {
 			s.Logger().Error("Failed to create pending blob records from SD blob",
 				zap.Uint("user_id", userID),
@@ -559,9 +559,12 @@ func (s *UploadServiceDefault) buildPendingBlobUpdates(deviceID uint, streamID *
 }
 
 // createPendingBlobsFromSDBlob creates pending blob records from SD blob child blob information
-// Terminating blobs are skipped and their blob number and IV are returned in terminatingBlobNum and terminatingBlobIV
-func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfos []stream.BlobInfo, terminatingBlobNum *int, terminatingBlobIV *[]byte) error {
-	return db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
+// Terminating blobs are skipped and their blob number and IV are returned
+func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context, userID, deviceID, streamID uint, blobInfos []stream.BlobInfo) (*int, []byte, error) {
+	var terminatingBlobNum *int
+	var terminatingBlobIV []byte
+
+	err := db.RetryableComponentTransaction(s, ctx, func(tx *gorm.DB) *gorm.DB {
 		for _, blobInfo := range blobInfos {
 			blobHash, isTerminating, hashErr := s.getBlobHashFromInfo(&blobInfo)
 			if hashErr != nil {
@@ -572,14 +575,8 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 			// Skip creating pending blob records for terminating blobs
 			// Instead, track the terminating blob number and IV
 			if isTerminating {
-				if terminatingBlobNum == nil {
-					terminatingBlobNum = new(int)
-				}
-				*terminatingBlobNum = blobInfo.BlobNum
-				// Store the IV for the terminating blob
-				if terminatingBlobIV != nil {
-					*terminatingBlobIV = blobInfo.IV
-				}
+				terminatingBlobNum = lo.ToPtr(blobInfo.BlobNum)
+				terminatingBlobIV = blobInfo.IV
 				continue
 			}
 
@@ -611,6 +608,8 @@ func (s *UploadServiceDefault) createPendingBlobsFromSDBlob(ctx context.Context,
 		}
 		return tx
 	})
+
+	return terminatingBlobNum, terminatingBlobIV, err
 }
 
 // GetMissingBlobs checks which required blobs are not available

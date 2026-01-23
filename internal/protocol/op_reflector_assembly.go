@@ -153,15 +153,16 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 	expectedTotal := pendingStream.TotalBlobs
 	pendingTotal := int(pendingCount)
 
+	// Account for terminating blob in pending total since it's not stored in pending_blobs table
+	if pendingStream.TerminatingBlobNumber != nil {
+		pendingTotal++
+	}
+
 	// Check for mismatch between expected total and SD blob requirements
 	if expectedTotal != len(requiredBlobs) {
-		h.Logger().Warn("Total blobs count mismatch between pending stream and SD blob",
-			zap.Uint("user_id", userID),
-			zap.String("sd_blob_hash", sdBlobHash),
-			zap.Int("expected_total_from_db", expectedTotal),
-			zap.Int("required_from_sd_blob", len(requiredBlobs)))
-		// Use the SD blob count as the authoritative source
-		expectedTotal = len(requiredBlobs)
+		hasTerminatingBlob := pendingStream.TerminatingBlobNumber != nil
+		return fmt.Errorf("total blobs count mismatch between pending stream (%d) and SD blob (%d) for sd_hash %q (has_terminating_blob: %v)",
+			expectedTotal, len(sdBlob.BlobInfos), sdBlobHash, hasTerminatingBlob)
 	}
 
 	// Check if we have missing blobs OR if pending count doesn't match expected
