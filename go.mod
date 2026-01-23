@@ -13,7 +13,7 @@ require (
 	github.com/tus/tusd/v2 v2.8.0
 	go.lumeweb.com/httputil v0.5.4
 	go.lumeweb.com/lbry-dht v0.0.0-20251122030212-8156f51f8639
-	go.lumeweb.com/liblbry v0.0.0-20260113003237-4afbcef02948
+	go.lumeweb.com/liblbry v0.0.0-20260123183808-ad404d2b1f54
 	go.lumeweb.com/portal v0.4.2-0.20260113001248-27af97c8a4ec
 	go.lumeweb.com/portal-middleware v0.3.4
 	go.lumeweb.com/portal-router v0.6.11
@@ -52,6 +52,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.12 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.5 // indirect
 	github.com/aws/smithy-go v1.24.0 // indirect
+	github.com/aybabtme/flatjson v0.1.3-0.20230505062430-1fbd38670561 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.9.1 // indirect
@@ -78,6 +79,7 @@ require (
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/glebarez/go-sqlite v1.22.0 // indirect
 	github.com/glebarez/sqlite v1.11.0 // indirect
+	github.com/glopal/orderedjson v0.0.0-20240326211827-f9de45c5f0bb // indirect
 	github.com/go-co-op/gocron/v2 v2.19.0 // indirect
 	github.com/go-errors/errors v1.5.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
