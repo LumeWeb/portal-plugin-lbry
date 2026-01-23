@@ -74,8 +74,7 @@ func generateRandomStream(tb testing.TB, streamName, suggestedFileName string) (
 	require.NoError(tb, err, "Failed to generate random content")
 
 	// Create stream creator
-	manifestCreator := stream.NewManifestCreator()
-	streamCreator := stream.NewStreamCreator(manifestCreator)
+	streamCreator := stream.NewStreamCreator()
 
 	// Create SD blob with metadata
 	sdBlob := &stream.SDBlob{
