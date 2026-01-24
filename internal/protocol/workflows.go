@@ -25,7 +25,6 @@ type PostUploadWorkflowData struct {
 // ReflectorAssemblyWorkflowData contains data for reflector assembly workflow processing
 type ReflectorAssemblyWorkflowData struct {
 	SDBlobHash string `json:"sd_blob_hash"`
-	Progress   int    `json:"progress"` // 0-100
 }
 
 // NewReflectorAssemblyOperation creates a new ReflectorAssemblyOperation
@@ -33,7 +32,7 @@ func NewReflectorAssemblyOperation(ctx core.Context) core.Operation {
 
 	return core.NewNamedOperation(
 		core.OperationName(internal.ProtocolName, REFLECTOR_ASSEMBLY_OPERATION),
-		core.OpTypeRetrieve,
+		core.OpTypeUpload,
 		NewReflectorAssemblyOperationHandler(ctx),
 		"Reassemble Blob Parts",
 	)

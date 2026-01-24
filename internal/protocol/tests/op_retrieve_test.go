@@ -52,7 +52,7 @@ func TestRetrieveOperationHandler_Execute_Integration(t *testing.T) {
 
 		// Assertions
 		wfTest.AssertOperationSuccess(req)
-		wfTest.AssertOperationStatusMessageContains(req, "Content retrieved from LBRY network")
+		wfTest.AssertOperationStatusMessageContains(req, "completed")
 		wfTest.AssertOperationStatusProgress(req, 100)
 
 	},

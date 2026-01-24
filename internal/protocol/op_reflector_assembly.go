@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
-	"time"
 
 	"github.com/samber/lo"
 	"go.lumeweb.com/liblbry/server"
@@ -17,6 +16,22 @@ import (
 	"go.lumeweb.com/portal/db/models"
 	"go.uber.org/zap"
 )
+
+// Reflector assembly step constants
+const (
+	assemblyStepCheckAssembly  = "check_assembly"
+	assemblyStepAssembleStream = "assemble_stream"
+	assemblyStepCleanup        = "cleanup"
+)
+
+// ReflectorAssemblyProgress holds progress state for assembly
+type ReflectorAssemblyProgress struct {
+	sdBlobHash     string
+	totalBlobs     int
+	tracker        *core.ProgressTracker
+	helper         *core.ProgressTrackerHelper
+	assemblyHelper *core.ProgressTrackerHelper
+}
 
 // ReflectorAssemblyOperationHandler handles the reflector assembly workflow operation
 type ReflectorAssemblyOperationHandler struct {
@@ -51,28 +66,62 @@ func (h *ReflectorAssemblyOperationHandler) Execute(ctx context.Context, req *mo
 		zap.Uint("user_id", *req.UserID),
 		zap.String("sd_blob_hash", workflow.SDBlobHash))
 
-	// Initialize progress
-	workflow.Progress = 10
-	err = h.UpdateWorkflowDataStruct(req.ID, workflow)
-	if err != nil {
-		h.Logger().Warn("Failed to update progress", zap.Error(err))
-	}
-
 	// Get upload service
 	uploadService := core.GetService[pluginCore.UploadService](h.Context(), pluginCore.UPLOAD_SERVICE)
 	if uploadService == nil {
 		return fmt.Errorf("upload service not found")
 	}
 
-	// Update progress - starting assembly
-	workflow.Progress = 30
-	err = h.UpdateWorkflowDataStruct(req.ID, workflow)
+	// Get pending stream for validation
+	pendingStream, err := uploadService.GetPendingStream(ctx, *req.UserID, workflow.SDBlobHash)
 	if err != nil {
-		h.Logger().Warn("Failed to update progress", zap.Error(err))
+		return fmt.Errorf("failed to get pending stream: %w", err)
+	}
+
+	h.Logger().Debug("Retrieved pending stream for progress tracking",
+		zap.Uint("user_id", *req.UserID),
+		zap.String("sd_blob_hash", workflow.SDBlobHash),
+		zap.Int("pending_stream_total_blobs", pendingStream.TotalBlobs),
+		zap.Bool("has_terminating_blob", pendingStream.TerminatingBlobNumber != nil))
+
+	// Initialize progress tracker with weighted steps
+	tracker, err := h.NewProgressTracker(req.ID, core.ProgressModeWeighted, func(cfg *core.ProgressTrackerConfig) {
+		cfg.Steps = []core.ProgressStep{
+			{
+				Name:        assemblyStepCheckAssembly,
+				Description: "Checking stream assembly progress",
+				Weight:      5,
+			},
+			{
+				Name:        assemblyStepAssembleStream,
+				Description: "Assembling stream from uploaded blobs",
+				Weight:      90,
+			},
+			{
+				Name:        assemblyStepCleanup,
+				Description: "Cleaning up temporary blobs",
+				Weight:      5,
+			},
+		}
+		cfg.MessageProvider = h.NewDefaultProgressMessageProvider(core.OpTypeUpload)
+	})
+	if err != nil {
+		return fmt.Errorf("failed to initialize progress tracker: %w", err)
+	}
+
+	if err = tracker.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize tracker: %w", err)
+	}
+
+	// Create progress state (totalBlobs will be set in checkAndAssembleStream)
+	progress := &ReflectorAssemblyProgress{
+		sdBlobHash: workflow.SDBlobHash,
+		tracker:    tracker,
+		helper:     core.NewProgressTrackerHelper(tracker, h.Context()),
 	}
 
 	// Attempt to assemble the stream
-	err = h.checkAndAssembleStream(ctx, uploadService, *req.UserID, workflow.SDBlobHash)
+	err = h.checkAndAssembleStream(ctx, uploadService, *req.UserID, workflow.SDBlobHash, progress)
 	if err != nil {
 		h.Logger().Info("Stream assembly not yet ready",
 			zap.Uint("user_id", *req.UserID),
@@ -81,13 +130,6 @@ func (h *ReflectorAssemblyOperationHandler) Execute(ctx context.Context, req *mo
 
 		// Return error to trigger workflow retry
 		return fmt.Errorf("stream assembly not ready: %w", err)
-	}
-
-	// Update progress - completed
-	workflow.Progress = 100
-	err = h.UpdateWorkflowDataStruct(req.ID, workflow)
-	if err != nil {
-		h.Logger().Warn("Failed to update progress", zap.Error(err))
 	}
 
 	h.Logger().Info("Successfully completed reflector assembly workflow",
@@ -103,6 +145,7 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 	uploadService pluginCore.UploadService,
 	userID uint,
 	sdBlobHash string,
+	progress *ReflectorAssemblyProgress,
 ) error {
 	// Get pending stream metadata from upload service
 	pendingStream, err := uploadService.GetPendingStream(ctx, userID, sdBlobHash)
@@ -137,6 +180,42 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 		return hex.EncodeToString(item.BlobHash)
 	})
 
+	// Count non-terminating blobs for sub-tracker work units
+	nonTerminatingBlobCount := 0
+	for _, blobInfo := range sdBlob.BlobInfos {
+		if len(blobInfo.BlobHash) > 0 {
+			nonTerminatingBlobCount++
+		}
+	}
+
+	// Set totalBlobs in progress state for sub-tracker creation
+	progress.totalBlobs = nonTerminatingBlobCount
+
+	h.Logger().Debug("SD blob info",
+		zap.Uint("user_id", userID),
+		zap.String("sd_blob_hash", sdBlobHash),
+		zap.Int("sd_blob_info_count", len(sdBlob.BlobInfos)),
+		zap.Int("non_terminating_blob_count", nonTerminatingBlobCount),
+		zap.Int("pending_stream_total_blobs", pendingStream.TotalBlobs),
+		zap.Bool("has_terminating_blob", pendingStream.TerminatingBlobNumber != nil))
+
+	// Create sub-tracker for blob assembly (work units mode)
+	assemblySubTracker, err := progress.tracker.CreateSubTrackerForStep(assemblyStepAssembleStream, core.ProgressModeWorkUnits, func(cfg *core.ProgressTrackerConfig) {
+		cfg.TotalWorkUnits = nonTerminatingBlobCount
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create assembly sub-tracker: %w", err)
+	}
+	// Initialize the sub-tracker
+	if err = assemblySubTracker.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize assembly sub-tracker: %w", err)
+	}
+	progress.assemblyHelper = core.NewProgressTrackerHelper(assemblySubTracker, h.Context())
+	h.Logger().Debug("Successfully created and initialized assembly sub-tracker",
+		zap.Uint("user_id", userID),
+		zap.String("sd_blob_hash", sdBlobHash),
+		zap.Int("total_work_units", nonTerminatingBlobCount))
+
 	// Check if we have all required blobs
 	missingBlobs, err := uploadService.GetMissingBlobs(ctx, userID, pendingStream.ID, requiredBlobs)
 	if err != nil {
@@ -161,6 +240,13 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 	// Check for mismatch between expected total and SD blob requirements
 	if expectedTotal != len(requiredBlobs) {
 		hasTerminatingBlob := pendingStream.TerminatingBlobNumber != nil
+		h.Logger().Debug("Total blobs count mismatch detected",
+			zap.Uint("user_id", userID),
+			zap.String("sd_blob_hash", sdBlobHash),
+			zap.Int("pending_stream_total_blobs", expectedTotal),
+			zap.Int("sd_blob_info_count", len(sdBlob.BlobInfos)),
+			zap.Int("required_blobs_count", len(requiredBlobs)),
+			zap.Bool("has_terminating_blob", hasTerminatingBlob))
 		return fmt.Errorf("total blobs count mismatch between pending stream (%d) and SD blob (%d) for sd_hash %q (has_terminating_blob: %v)",
 			expectedTotal, len(sdBlob.BlobInfos), sdBlobHash, hasTerminatingBlob)
 	}
@@ -184,10 +270,24 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 			pendingTotal, expectedTotal, len(missingBlobs))
 	}
 
-	// Assemble the stream
-	err = h.assembleStream(ctx, uploadService, storageSvc, storageProtocol, userID, sdBlob)
-	if err != nil {
+	// Step 1: Check assembly complete
+	if err = progress.helper.RunStep(assemblyStepCheckAssembly, 100, func() error {
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err = progress.helper.RunStep(assemblyStepAssembleStream, 100, func() error {
+		return h.assembleStream(ctx, uploadService, storageSvc, storageProtocol, userID, sdBlob, progress)
+	}); err != nil {
 		return fmt.Errorf("failed to assemble stream: %w", err)
+	}
+
+	// Step 3: Cleanup
+	if err = progress.helper.RunStep(assemblyStepCleanup, 100, func() error {
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	h.Logger().Info("Successfully assembled stream",
@@ -201,7 +301,7 @@ func (h *ReflectorAssemblyOperationHandler) checkAndAssembleStream(
 }
 
 // assembleStream assembles the stream from temporary blobs and moves to permanent storage
-func (h *ReflectorAssemblyOperationHandler) assembleStream(ctx context.Context, uploadService pluginCore.UploadService, storageSvc core.StorageService, storageProtocol core.StorageProtocol, userID uint, sdBlob *lbrystream.SDBlob) error {
+func (h *ReflectorAssemblyOperationHandler) assembleStream(ctx context.Context, uploadService pluginCore.UploadService, storageSvc core.StorageService, storageProtocol core.StorageProtocol, userID uint, sdBlob *lbrystream.SDBlob, progress *ReflectorAssemblyProgress) error {
 	// Inject UserID into context for ReflectorStore operations
 	ctx = withUserIDContext(ctx, userID)
 	// Get protocol and blob manager
@@ -239,6 +339,7 @@ func (h *ReflectorAssemblyOperationHandler) assembleStream(ctx context.Context, 
 		zap.Int("sd_blob_size", len(sdBlobBytes)))
 
 	// Move only regular blobs (not SD blob) from temporary to permanent storage
+	unitIndex := 0
 	for _, blobInfo := range sdBlob.BlobInfos {
 		// Get blob from ReflectorStore for reading pending blobs
 		if len(blobInfo.BlobHash) == 0 {
@@ -249,29 +350,43 @@ func (h *ReflectorAssemblyOperationHandler) assembleStream(ctx context.Context, 
 
 		blobHash := hex.EncodeToString(blobInfo.BlobHash)
 
-		// Check if blob exists in temporary storage before attempting to retrieve it
-		exists, err := reflectorStore.Has(ctx, blobHash)
-		if err != nil {
-			return fmt.Errorf("failed to check blob existence for %s: %w", blobHash, err)
-		}
-		if !exists {
-			return fmt.Errorf("blob %s not found in temporary storage", blobHash)
-		}
-
-		data, err := reflectorStore.Get(ctx, blobHash)
-		if err != nil {
-			return fmt.Errorf("failed to get blob %s from reflector store: %w", blobHash, err)
-		}
-
-		// Store blob in blob manager using AddBlob
-		err = blobManager.AddBlob(ctx, blobHash, data)
-		if err != nil {
-			return fmt.Errorf("failed to add blob %s to blob manager: %w", blobHash, err)
-		}
-
-		h.Logger().Debug("Successfully stored blob in blob manager",
+		h.Logger().Debug("Processing blob",
+			zap.Uint("user_id", userID),
+			zap.String("sd_blob_hash", sdBlobHash),
 			zap.String("blob_hash", blobHash),
-			zap.Int("blob_size", len(data)))
+			zap.Int("blob_num", blobInfo.BlobNum),
+			zap.Int("unit_index", unitIndex))
+
+		processErr := progress.assemblyHelper.RunWorkUnit(unitIndex, func() error {
+			// Check if blob exists in temporary storage before attempting to retrieve it
+			exists, err := reflectorStore.Has(ctx, blobHash)
+			if err != nil {
+				return fmt.Errorf("failed to check blob existence for %s: %w", blobHash, err)
+			}
+			if !exists {
+				return fmt.Errorf("blob %s not found in temporary storage", blobHash)
+			}
+
+			data, err := reflectorStore.Get(ctx, blobHash)
+			if err != nil {
+				return fmt.Errorf("failed to get blob %s from reflector store: %w", blobHash, err)
+			}
+
+			// Store blob in blob manager using AddBlob
+			err = blobManager.AddBlob(ctx, blobHash, data)
+			if err != nil {
+				return fmt.Errorf("failed to add blob %s to blob manager: %w", blobHash, err)
+			}
+
+			h.Logger().Debug("Successfully stored blob in blob manager",
+				zap.String("blob_hash", blobHash),
+				zap.Int("blob_size", len(data)))
+			return nil
+		})
+		if processErr != nil {
+			return processErr
+		}
+		unitIndex++
 	}
 
 	// Build stream result from SD blob
@@ -311,43 +426,7 @@ func (h *ReflectorAssemblyOperationHandler) assembleStream(ctx context.Context, 
 
 // GetStatus returns the status of the reflector assembly operation
 func (h *ReflectorAssemblyOperationHandler) GetStatus(_ context.Context, req *models.Request) (*core.RequestStatus, error) {
-	status := &core.RequestStatus{
-		State:     req.Status,
-		UpdatedAt: time.Now(),
-	}
-
-	// Try to get workflow data for progress
-	var workflow ReflectorAssemblyWorkflowData
-	err := h.StructuredWorkflowData(req.ID, &workflow)
-
-	// Set default status based on request status
-	switch req.Status {
-	case models.RequestStatusPending:
-		status.ProgressPercent = 0
-		status.Message = "Waiting to start reflector assembly"
-	case models.RequestStatusProcessing:
-		if err == nil {
-			status.ProgressPercent = float64(workflow.Progress)
-		} else {
-			status.ProgressPercent = 25 // Fallback progress
-		}
-		status.Message = "Assembling stream from uploaded blobs"
-	case models.RequestStatusCompleted:
-		status.ProgressPercent = 100
-		status.Message = "Stream assembly completed successfully"
-	case models.RequestStatusFailed:
-		status.ProgressPercent = 0
-		status.Message = "Stream assembly failed"
-	default:
-		if err == nil {
-			status.ProgressPercent = float64(workflow.Progress)
-		} else {
-			status.ProgressPercent = 0
-		}
-		status.Message = "Assembly in progress"
-	}
-
-	return status, nil
+	return h.GetStatusFromWorkflowData(req.ID, req)
 }
 
 // Cleanup handles cleanup for the reflector assembly operation

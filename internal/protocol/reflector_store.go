@@ -85,7 +85,6 @@ func (rs *ReflectorStore) PutSD(ctx context.Context, hash string, data []byte) e
 		// Pass the SD hash as workflow data for tracking
 		core.WithWorkflowStructData(&ReflectorAssemblyWorkflowData{
 			SDBlobHash: hash,
-			Progress:   0,
 		}, "json"),
 		// Associate the workflow with the authenticated user
 		core.WithWorkflowUserID(userID),
