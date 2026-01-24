@@ -103,7 +103,7 @@ func (h *ReflectorAssemblyOperationHandler) Execute(ctx context.Context, req *mo
 				Weight:      5,
 			},
 		}
-		cfg.MessageProvider = h.NewDefaultProgressMessageProvider(core.OpTypeRetrieve)
+		cfg.MessageProvider = h.NewDefaultProgressMessageProvider(core.OpTypeUpload)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to initialize progress tracker: %w", err)

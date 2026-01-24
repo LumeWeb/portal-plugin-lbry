@@ -32,7 +32,7 @@ func NewReflectorAssemblyOperation(ctx core.Context) core.Operation {
 
 	return core.NewNamedOperation(
 		core.OperationName(internal.ProtocolName, REFLECTOR_ASSEMBLY_OPERATION),
-		core.OpTypeRetrieve,
+		core.OpTypeUpload,
 		NewReflectorAssemblyOperationHandler(ctx),
 		"Reassemble Blob Parts",
 	)
