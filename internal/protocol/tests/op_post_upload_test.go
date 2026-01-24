@@ -61,7 +61,7 @@ func TestPostUploadOperationHandler_Execute_Integration(t *testing.T) {
 		// Assert
 		// Assertions
 		wfTest.AssertOperationSuccess(req)
-		wfTest.AssertOperationStatusMessageContains(req, "Upload processed successfully")
+		wfTest.AssertOperationStatusMessageContains(req, "Upload completed")
 		wfTest.AssertOperationStatusProgress(req, 100)
 
 		// Verify that the stream was created in the database
