@@ -764,6 +764,8 @@ go.lumeweb.com/portal v0.4.2-0.20260113001248-27af97c8a4ec h1:WGTuTvfg6HS1X6mJ7C
 go.lumeweb.com/portal v0.4.2-0.20260113001248-27af97c8a4ec/go.mod h1:/7zqS4M4ep4ab6TL/jm2vE10gUtNVCGULiDcqclYQ9E=
 go.lumeweb.com/portal v0.4.2-0.20260124065440-92846b110111 h1:7c623NA6vuOJRIDM6SFTG7u6uAl8V3lR68V2moH6Hdw=
 go.lumeweb.com/portal v0.4.2-0.20260124065440-92846b110111/go.mod h1:0YUT5CiL0ktYafwR6WYLqxQxcatlYP0PyG0EqLIpF08=
+go.lumeweb.com/portal v0.4.2-0.20260124090106-352dc2e28d85 h1:dvHQN6jBvPJlEuZ/8b27dauS1N21ZlHEDMCnbP91EXs=
+go.lumeweb.com/portal v0.4.2-0.20260124090106-352dc2e28d85/go.mod h1:0YUT5CiL0ktYafwR6WYLqxQxcatlYP0PyG0EqLIpF08=
 go.lumeweb.com/portal-middleware v0.3.4 h1:A9/Ipo3giX449CCgbKGco97IqDxFG7Z1ppmM1IQBeDQ=
 go.lumeweb.com/portal-middleware v0.3.4/go.mod h1:3dHvOYXApc1b673I1UAoYBpyXg2c7ku4HqxXvef8dj8=
 go.lumeweb.com/portal-router v0.6.11 h1:0PTej57mtNcRpKZNukD0j0ZYp5ntbR7fl5g6DO+0mvk=
