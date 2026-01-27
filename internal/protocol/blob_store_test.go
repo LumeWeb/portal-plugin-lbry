@@ -997,6 +997,113 @@ func TestLBRYBlobStore_Get_NotInDB(t *testing.T) {
 	})
 }
 
+func TestInternal_SetSDBlobProfileByHash_ProfileNewSort(t *testing.T) {
+	ast := assert.New(t)
+
+	// Create an SD blob with ProfileNewSort
+	streamName := "test_file"
+	key, _ := hex.DecodeString("30313233343536373031323334353637")
+	suggestedFileName := "test_file"
+	streamHash, _ := hex.DecodeString("4fcd4064713bf639362248d3ac0c0ee527a93a08ce4991954d6e11b0317e79b6beedb6833e18e7ae8b0f14ddf258e386")
+
+	blobHash, _ := hex.DecodeString("e6063cf9656e3ff24a197c5abdc2e5832d166de3b045d789b3f61526f1e82ff64e863a96dced804078dccc65bda6f7b8")
+	iv, _ := hex.DecodeString("30303030303030303030303030303031")
+
+	sdBlob := stream.SDBlob{
+		StreamName:        streamName,
+		BlobInfos:         []stream.BlobInfo{{Length: 100, BlobNum: 0, BlobHash: blobHash, IV: iv}},
+		StreamType:        "lbryfile",
+		Key:               key,
+		SuggestedFileName: suggestedFileName,
+		StreamHash:        streamHash,
+	}
+
+	// Set to ProfileNewSort
+	sdBlob.SetProfile(stream.ProfileNewSort)
+	expectedHash := sdBlob.HashHex()
+
+	// Reset profile to test the helper
+	sdBlob.SetProfile(stream.ProfileOldSort)
+
+	// Act - should detect ProfileNewSort produces correct hash
+	err := internal.SetSDBlobProfileByHash(&sdBlob, expectedHash)
+
+	// Assert
+	ast.NoError(err)
+	ast.Equal(stream.ProfileNewSort, sdBlob.GetProfile())
+	ast.Equal(expectedHash, sdBlob.HashHex())
+}
+
+func TestInternal_SetSDBlobProfileByHash_ProfileOldSort(t *testing.T) {
+	ast := assert.New(t)
+
+	// Create an SD blob with ProfileOldSort
+	streamName := "test_file"
+	key, _ := hex.DecodeString("30313233343536373031323334353637")
+	suggestedFileName := "test_file"
+	streamHash, _ := hex.DecodeString("4fcd4064713bf639362248d3ac0c0ee527a93a08ce4991954d6e11b0317e79b6beedb6833e18e7ae8b0f14ddf258e386")
+
+	blobHash, _ := hex.DecodeString("e6063cf9656e3ff24a197c5abdc2e5832d166de3b045d789b3f61526f1e82ff64e863a96dced804078dccc65bda6f7b8")
+	iv, _ := hex.DecodeString("30303030303030303030303030303031")
+
+	sdBlob := stream.SDBlob{
+		StreamName:        streamName,
+		BlobInfos:         []stream.BlobInfo{{Length: 100, BlobNum: 0, BlobHash: blobHash, IV: iv}},
+		StreamType:        "lbryfile",
+		Key:               key,
+		SuggestedFileName: suggestedFileName,
+		StreamHash:        streamHash,
+	}
+
+	// Set to ProfileOldSort
+	sdBlob.SetProfile(stream.ProfileOldSort)
+	expectedHash := sdBlob.HashHex()
+
+	// Reset profile to test the helper
+	sdBlob.SetProfile(stream.ProfileNewSort)
+
+	// Act - should detect ProfileOldSort produces correct hash
+	err := internal.SetSDBlobProfileByHash(&sdBlob, expectedHash)
+
+	// Assert
+	ast.NoError(err)
+	ast.Equal(stream.ProfileOldSort, sdBlob.GetProfile())
+	ast.Equal(expectedHash, sdBlob.HashHex())
+}
+
+func TestInternal_SetSDBlobProfileByHash_HashMismatch(t *testing.T) {
+	ast := assert.New(t)
+
+	// Create an SD blob with ProfileNewSort
+	streamName := "test_file"
+	key, _ := hex.DecodeString("30313233343536373031323334353637")
+	suggestedFileName := "test_file"
+	streamHash, _ := hex.DecodeString("4fcd4064713bf639362248d3ac0c0ee527a93a08ce4991954d6e11b0317e79b6beedb6833e18e7ae8b0f14ddf258e386")
+
+	blobHash, _ := hex.DecodeString("e6063cf9656e3ff24a197c5abdc2e5832d166de3b045d789b3f61526f1e82ff64e863a96dced804078dccc65bda6f7b8")
+	iv, _ := hex.DecodeString("30303030303030303030303030303031")
+
+	sdBlob := stream.SDBlob{
+		StreamName:        streamName,
+		BlobInfos:         []stream.BlobInfo{{Length: 100, BlobNum: 0, BlobHash: blobHash, IV: iv}},
+		StreamType:        "lbryfile",
+		Key:               key,
+		SuggestedFileName: suggestedFileName,
+		StreamHash:        streamHash,
+	}
+
+	// Reset profile to test the helper
+	sdBlob.SetProfile(stream.ProfileOldSort)
+
+	// Act - provide an incorrect SD hash that won't match either profile
+	err := internal.SetSDBlobProfileByHash(&sdBlob, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
+
+	// Assert
+	ast.Error(err)
+	ast.Contains(err.Error(), "hash mismatch")
+	ast.Contains(err.Error(), "expected")
+}
+
 func TestLBRYBlobStore_Put_LargeBlob(t *testing.T) {
 	runBlobStoreTest(t, func(tb testing.TB, ctx coreTesting.TestContext) { // Arrange
 		ast := assert.New(tb)

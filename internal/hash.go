@@ -1,7 +1,10 @@
 package internal
 
 import (
+	"encoding/hex"
 	"fmt"
+
+	"crypto/subtle"
 
 	"github.com/ipfs/go-cid"
 	"go.lumeweb.com/liblbry/stream"
@@ -51,4 +54,44 @@ func cidToLbryHash(c cid.Cid) (string, error) {
 // CIDToLBRYHash converts a CID to an LBRY hash
 func CIDToLBRYHash(c cid.Cid) (string, error) {
 	return cidToLbryHash(c)
+}
+
+// SetSDBlobProfileByHash attempts to set the correct profile for an SD blob
+// by testing both profiles and using the one that produces a matching SD hash
+func SetSDBlobProfileByHash(sdBlob *stream.SDBlob, sdHash string) error {
+	// Decode the expected hash bytes
+	expectedHashBytes, err := hex.DecodeString(sdHash)
+	if err != nil {
+		return fmt.Errorf("failed to decode expected SD hash %q: %w", sdHash, err)
+	}
+
+	// Try ProfileNewSort first (default)
+	sdBlob.SetProfile(stream.ProfileNewSort)
+	_, err = sdBlob.ToBlob()
+	if err != nil {
+		return fmt.Errorf("failed to serialize SD blob with new sort profile: %w", err)
+	}
+
+	// Check if the SD hash matches the expected hash using constant-time comparison
+	computedHash := sdBlob.Hash()
+	if subtle.ConstantTimeCompare(computedHash, expectedHashBytes) == 1 {
+		return nil
+	}
+
+	// Try ProfileOldSort if new sort didn't match
+	sdBlob.SetProfile(stream.ProfileOldSort)
+	_, err = sdBlob.ToBlob()
+	if err != nil {
+		return fmt.Errorf("failed to serialize SD blob with old sort profile: %w", err)
+	}
+
+	// Check if the SD hash matches with old sort using constant-time comparison
+	computedHash = sdBlob.Hash()
+	if subtle.ConstantTimeCompare(computedHash, expectedHashBytes) == 1 {
+		return nil
+	}
+
+	// Neither profile produced a matching SD hash
+	return fmt.Errorf("SD blob %q hash mismatch: expected %s, got %s",
+		sdHash, hex.EncodeToString(computedHash))
 }
