@@ -235,6 +235,11 @@ func (bs *BlobStore) getSDBlob(ctx context.Context, _stream *pluginDb.Stream, ha
 
 	sdBlob.BlobInfos = blobInfos
 
+	// Set the correct profile by testing both and using the one that matches the SD hash
+	if err := internal.SetSDBlobProfileByHash(&sdBlob, hash); err != nil {
+		return nil, err
+	}
+
 	// Serialize the SD blob
 	data, err := sdBlob.ToBlob()
 	if err != nil {
@@ -243,6 +248,8 @@ func (bs *BlobStore) getSDBlob(ctx context.Context, _stream *pluginDb.Stream, ha
 
 	return data, nil
 }
+
+
 
 // getRegularBlob handles regular blob retrieval
 func (bs *BlobStore) getRegularBlob(ctx context.Context, hash string) ([]byte, error) {

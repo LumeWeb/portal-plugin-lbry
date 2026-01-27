@@ -479,6 +479,11 @@ func (h *ReflectorAssemblyOperationHandler) buildSDBlob(ctx context.Context, upl
 
 	sdBlob.BlobInfos = blobInfos
 
+	// Set the correct profile by testing both and using the one that matches the SD hash
+	if err := internal.SetSDBlobProfileByHash(&sdBlob, pendingStream.SDHash); err != nil {
+		return nil, err
+	}
+
 	return &sdBlob, nil
 }
 
