@@ -1,6 +1,6 @@
 module go.lumeweb.com/portal-plugin-lbry
 
-go 1.24.3
+go 1.26
 
 require (
 	github.com/Oudwins/zog v0.22.0
@@ -18,7 +18,7 @@ require (
 	go.lumeweb.com/portal-middleware v0.3.4
 	go.lumeweb.com/portal-router v0.6.11
 	go.lumeweb.com/queryutil v0.3.15
-	go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260606140504-280cab62aeb6
+	go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260609165001-7bdb11c87f22
 	go.uber.org/zap v1.27.1
 	gorm.io/gorm v1.31.1
 )
