@@ -768,8 +768,8 @@ go.lumeweb.com/portal-router v0.6.11 h1:0PTej57mtNcRpKZNukD0j0ZYp5ntbR7fl5g6DO+0
 go.lumeweb.com/portal-router v0.6.11/go.mod h1:4tb+XYa0GYiFVraMoossGgMBTN9z4U54v8SL+EOBvbs=
 go.lumeweb.com/queryutil v0.3.15 h1:R2l6GAAne8rCgh1rGy5HQ54zvs8JJw3gRLjhmkd8SHk=
 go.lumeweb.com/queryutil v0.3.15/go.mod h1:nLkIuXzugX8Ln24wsAbfTafvNmaTHLJhIUKWC1693G4=
-go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260701211359-92007bb0f69d h1:QkYL2HFweItk98CJa2WMUgYdjMdwr9xaSZi8E/cu2q0=
-go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260701211359-92007bb0f69d/go.mod h1:6MLUUITA6+En7yI/ilirkfsbgwU+MRxhDMrpsdCqSxQ=
+go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260702005316-eaedf7327499 h1:P2/9GtREbfKCfJSCQSfB+0A9u72qIVbHjjaAHbKsHms=
+go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260702005316-eaedf7327499/go.mod h1:6MLUUITA6+En7yI/ilirkfsbgwU+MRxhDMrpsdCqSxQ=
 go.mongodb.org/mongo-driver v1.11.4/go.mod h1:PTSz5yu21bkT/wXpkS7WR5f0ddqw5quethTUn9WM+2g=
 go.opencensus.io v0.21.0/go.mod h1:mSImk1erAIZhrmZN+AvHh14ztQfjbGwt4TtuofqLduU=
 go.opencensus.io v0.22.0/go.mod h1:+kGneAE2xo2IficOXnaByMWTGM9T73dGwxeWcUqIpI8=
