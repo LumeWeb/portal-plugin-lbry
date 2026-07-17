@@ -2,7 +2,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"go.lumeweb.com/portal/core"
@@ -30,49 +29,10 @@ var (
 	ErrKeyDeviceListFailed         core.ErrorType = "device_list_failed"
 )
 
-// ErrorDetails represents detailed error information
-type ErrorDetails struct {
-	Message string `json:"message"`
-	Code    string `json:"code"`
-}
-
-// ErrorWrapper wraps an error with additional context
-type ErrorWrapper struct {
-	error
-	details *ErrorDetails
-}
-
-// LBRYError represents a LBRY-specific error
-type LBRYError struct {
-	coreErr *core.Error
-}
-
-// MarshalJSON implements json.Marshaler for structured error responses
-func (e *ErrorWrapper) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
-		"error": e.details.Message,
-		"code":  e.details.Code,
-	})
-}
-
-// Error returns the error message
-func (e *LBRYError) Error() string {
-	return e.coreErr.Error()
-}
-
-// HttpStatus returns the HTTP status code for the error
-func (e *LBRYError) HttpStatus() int {
-	return e.coreErr.HttpStatus()
-}
-
-// Unwrap returns the underlying error
-func (e *LBRYError) Unwrap() error {
-	return e.coreErr.Unwrap()
-}
-
-// NewError creates a new LBRY error
-func NewError(key core.ErrorType, err error, args ...any) *LBRYError {
-	return &LBRYError{core.NewError(Namespace, key, err, args...)}
+// NewError creates a LBRY-specific error using the canonical core.Error type,
+// which handles JSON marshaling via core.Error.MarshalJSON.
+func NewError(key core.ErrorType, err error, args ...any) *core.Error {
+	return core.NewError(Namespace, key, err, args...)
 }
 
 // init registers the LBRY namespace and error messages
