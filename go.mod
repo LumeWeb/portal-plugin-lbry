@@ -18,7 +18,7 @@ require (
 	go.lumeweb.com/portal-middleware v0.3.7
 	go.lumeweb.com/portal-router v0.7.6
 	go.lumeweb.com/queryutil v0.3.17
-	go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260707061228-b351ce1bbdfd
+	go.lumeweb.com/web/go/portal-plugin-lbry v0.0.0-20260718153852-cbf5af8ed65f
 	go.uber.org/zap v1.28.0
 	gorm.io/gorm v1.31.2
 )
